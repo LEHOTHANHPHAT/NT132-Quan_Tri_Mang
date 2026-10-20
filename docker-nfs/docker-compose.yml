@@ -1,0 +1,21 @@
+services:
+  nfs-ubuntu:
+    build: ./ubuntu-server
+    container_name: nfs-server-ubuntu
+    privileged: true
+    ports:
+      - "2049:2049"
+    volumes:
+      - ../shared-data/public:/exports/public
+      - ../shared-data/restricted:/exports/restricted
+      - /lib/modules:/lib/modules:ro
+    networks:
+      nfs-net:
+        ipv4_address: 172.28.0.10
+
+networks:
+  nfs-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
