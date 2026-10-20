@@ -1,0 +1,20 @@
+# Bỏ qua dữ liệu thực nghiệm sinh ra trong thư mục chia sẻ
+shared-data/public/*
+!shared-data/public/.gitkeep
+shared-data/restricted/*
+!shared-data/restricted/.gitkeep
+
+# Bỏ qua file kết quả benchmark và file test dung lượng lớn
+*.img
+*.iso
+*.tar.gz
+benchmarks/results/
+*.fio.out
+
+# Bỏ qua log và các file tạm của hệ điều hành / IDE
+*.log
+*.swp
+*~
+.DS_Store
+.vscode/
+.idea/

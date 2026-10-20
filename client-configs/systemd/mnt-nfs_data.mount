@@ -1,0 +1,13 @@
+[Unit]
+Description=Mount NFS Share tu Cum HA Server
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=192.168.56.100:/public
+Where=/mnt/nfs_data
+Type=nfs4
+Options=rw,sync,hard,_netdev
+
+[Install]
+WantedBy=multi-user.target

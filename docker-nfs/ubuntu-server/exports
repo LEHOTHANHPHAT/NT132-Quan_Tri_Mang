@@ -1,0 +1,8 @@
+# Thư mục gốc Pseudo-filesystem cho NFSv4
+/exports                172.28.0.0/24(ro,sync,fsid=0,crossmnt,no_subtree_check)
+
+# Chia sẻ cho toàn dải mạng 172.28.0.0/24 với quyền đọc/ghi và ép quyền root về nobody (root_squash)
+/exports/public         172.28.0.0/24(rw,sync,no_subtree_check,root_squash)
+
+# Chỉ cho phép duy nhất IP 172.28.0.20 quyền đọc/ghi, các máy khác trong mạng chỉ được đọc (ro)
+/exports/restricted     172.28.0.20(rw,sync,no_subtree_check) 172.28.0.0/24(ro,sync,no_subtree_check)

@@ -1,0 +1,9 @@
+[Unit]
+Description=Automount NFS Share khi co truy cap
+
+[Automount]
+Where=/mnt/nfs_data
+TimeoutIdleSec=60
+
+[Install]
+WantedBy=multi-user.target
