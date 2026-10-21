@@ -1,7 +1,8 @@
 services:
-  nfs-ubuntu:
+  nfs-node1:
     build: ./ubuntu-server
-    container_name: nfs-server-ubuntu
+    container_name: nfs-ubuntu-node1
+    hostname: nfs-node1
     privileged: true
     ports:
       - "2049:2049"
@@ -11,7 +12,20 @@ services:
       - /lib/modules:/lib/modules:ro
     networks:
       nfs-net:
-        ipv4_address: 172.28.0.10
+        ipv4_address: 172.28.0.11
+
+  nfs-node2:
+    build: ./ubuntu-server
+    container_name: nfs-ubuntu-node2
+    hostname: nfs-node2
+    privileged: true
+    volumes:
+      - ../shared-data/public:/exports/public
+      - ../shared-data/restricted:/exports/restricted
+      - /lib/modules:/lib/modules:ro
+    networks:
+      nfs-net:
+        ipv4_address: 172.28.0.12
 
 networks:
   nfs-net:

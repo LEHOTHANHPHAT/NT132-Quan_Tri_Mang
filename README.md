@@ -8,7 +8,7 @@ Repository lưu trữ mã nguồn, cấu hình Docker, script tự động hóa 
 
 * Nghiên cứu kiến trúc cốt lõi của NFS (VFS, RPC, XDR) và đối sánh hiệu năng thực tế với **SMB/CIFS, FTP, SSHFS**.
 * Phân tích sự tiến hóa từ **NFSv2, NFSv3 (Stateless)** lên **NFSv4, NFSv4.1 (Stateful)** và các cơ chế xác thực (`AUTH_SYS`, **Kerberos**).
-* Đóng gói và triển khai **NFS Server trên Docker** với cả hai nhánh hệ điều hành **Ubuntu** và **CentOS/Rocky Linux**.
+* Đóng gói và triển khai NFS Server trên Docker (môi trường Ubuntu Server), dễ dàng nhân bản để phục vụ mô hình cụm máy chủ.
 * Thực nghiệm quản lý quyền truy cập theo IP/Subnet, kiểm chứng các tham số mount (`rw/ro`, `sync/async`, `root_squash`/`no_root_squash`) và tự động hóa bằng `fstab` & `systemd automount`.
 * Thiết kế và triển khai cụm **NFS Server High Availability (HA)** đảm bảo tính liên tục của dịch vụ khi xảy ra sự cố phần cứng/mạng.
 
@@ -19,7 +19,7 @@ Repository lưu trữ mã nguồn, cấu hình Docker, script tự động hóa 
 | Thành viên | Mảng phụ trách | Thư mục làm việc chính | Nhánh Git (Branch) |
 | :--- | :--- | :--- | :--- |
 | **Thành viên 1** | Kiến trúc cốt lõi, So sánh giao thức & Benchmark | `docs/`, `benchmarks/` | `feat/architecture-benchmark` |
-| **Thành viên 2** | NFS Server trên Docker (Ubuntu/CentOS) & Quản lý Export | `docker-nfs/` | `feat/docker-nfs-server` |
+| **Thành viên 2** | NFS Server trên Docker (Ubuntu) & Quản lý Export | `docker-nfs/` | `feat/docker-nfs-server` |
 | **Thành viên 3** | NFS Client, Tự động hóa Mount (`fstab`/`systemd`) & Bảo mật | `client-configs/` | `feat/client-automount-sec` |
 | **Thành viên 4** | Hạ tầng High Availability (Keepalived + Shared Storage) | `ha-cluster/` | `feat/nfs-ha-cluster` |
 
@@ -42,7 +42,7 @@ Repository lưu trữ mã nguồn, cấu hình Docker, script tự động hóa 
               v                                                   v
 +---------------------------+                       +---------------------------+
 |     NFS Server Node 1     | <=== Keepalived ====> |     NFS Server Node 2     |
-|  (Docker Ubuntu / CentOS) |      (Heartbeat)      |  (Docker Ubuntu / CentOS) |
+|  (Docker Ubuntu) |      (Heartbeat)      |  (Docker Ubuntu) |
 +-------------+-------------+                       +-------------+-------------+
               |                                                   |
               +------ Đồng bộ dữ liệu (DRBD / GlusterFS) ---------+
