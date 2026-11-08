@@ -1,0 +1,55 @@
+services:
+  nfs-node1:
+    build: ./ubuntu-server
+    container_name: nfs-ubuntu-node1
+    hostname: nfs-node1
+    privileged: true
+    ports:
+      - "2049:2049"
+    volumes:
+      - ../shared-data/public:/exports/share
+      - ../shared-data/restricted:/exports/no_squash
+      - /lib/modules:/lib/modules:ro
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.11
+
+  nfs-node2:
+    build: ./ubuntu-server
+    container_name: nfs-ubuntu-node2
+    hostname: nfs-node2
+    privileged: true
+    volumes:
+      - ../shared-data/public:/exports/share
+      - ../shared-data/restricted:/exports/no_squash
+      - /lib/modules:/lib/modules:ro
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.12
+
+  client-rw:
+    build: ./ubuntu-server
+    container_name: nfs-client-1
+    hostname: client-1
+    privileged: true
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.101
+
+  client-ro:
+    build: ./ubuntu-server
+    container_name: nfs-client-2
+    hostname: client-2
+    privileged: true
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.102
+
+networks:
+  nfs-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.10.0/24

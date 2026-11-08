@@ -1,0 +1,3 @@
+/exports            192.168.10.0/24(ro,sync,fsid=0,crossmnt,no_subtree_check)
+/exports/share      192.168.10.101(rw,sync,fsid=1,no_subtree_check,root_squash) 192.168.10.0/24(ro,sync,fsid=1,no_subtree_check,root_squash)
+/exports/no_squash  192.168.10.0/24(rw,sync,fsid=2,no_subtree_check,no_root_squash)

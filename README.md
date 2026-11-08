@@ -42,7 +42,7 @@ Repository lưu trữ mã nguồn, cấu hình Docker, script tự động hóa 
               v                                                   v
 +---------------------------+                       +---------------------------+
 |     NFS Server Node 1     | <=== Keepalived ====> |     NFS Server Node 2     |
-|  (Docker Ubuntu / CentOS) |      (Heartbeat)      |  (Docker Ubuntu / CentOS) |
+|       (Docker Ubuntu)     |   `  (Heartbeat()   |         (Docker Ubuntu)     |
 +-------------+-------------+                       +-------------+-------------+
               |                                                   |
               +------ Đồng bộ dữ liệu (DRBD / GlusterFS) ---------+
