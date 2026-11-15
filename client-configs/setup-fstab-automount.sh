@@ -36,14 +36,24 @@ else
 fi
 
 echo
-echo "=== Nap lai systemd va kich hoat mount ==="
-systemctl daemon-reload
-# Vi dung "noauto" + x-systemd.automount, mountpoint se duoc quan ly
-# boi don vi *.automount tu dong sinh tu fstab (xem: systemctl list-units '*.automount')
-systemctl start "$(systemd-escape -p --suffix=automount "${MOUNT_POINT}")" || true
+echo "=== Kich hoat mount theo fstab vua them ==="
+if command -v systemctl >/dev/null 2>&1; then
+    # May co systemd (VM that, hoac container duoc cau hinh chay systemd lam PID 1):
+    # quan ly mount thong qua don vi *.automount duoc systemd tu sinh ra tu fstab.
+    echo "Phat hien systemd, dung co che automount cua systemd."
+    systemctl daemon-reload
+    systemctl start "$(systemd-escape -p --suffix=automount "${MOUNT_POINT}")" || true
+    echo "Kiem tra: systemctl status $(systemd-escape -p --suffix=automount "${MOUNT_POINT}")"
+else
+    # Container Docker toi gian thuong KHONG co binary systemctl.
+    # Cac option x-systemd.* trong fstab se bi 'mount' bo qua (khong loi),
+    # nen fallback ve mount truc tiep theo entry fstab.
+    echo "Khong tim thay 'systemctl' (container khong cai systemd)."
+    echo "Fallback: mount truc tiep theo entry fstab vua them."
+    mount "${MOUNT_POINT}"
+fi
 
 echo
 echo "Kiem tra:"
-echo "  systemctl status $(systemd-escape -p --suffix=automount "${MOUNT_POINT}")"
-echo "  ls ${MOUNT_POINT}   # truy cap se kich hoat mount thuc su (on-demand)"
+echo "  ls ${MOUNT_POINT}"
 echo "  mount | grep nfs4"

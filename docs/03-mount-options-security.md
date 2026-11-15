@@ -1,4 +1,9 @@
-# Dựng môi trường
+# Mount Options & Bảo mật NFS Client
+| Client | IP | Quyền trên `/share` |
+|---|---|---|
+| `client-rw` | 192.168.10.101 | `rw` |
+| `client-ro` | 192.168.10.102 | `ro` |
+## Dựng môi trường
 
 Trong thư mục `docker-nfs` chạy lệnh khởi động các container (nhớ mở docker lên trước):
 ```bash
@@ -10,7 +15,7 @@ Kiểm tra:
 docker compose ps
 ```
 
-# Vào trong container
+## Vào trong container
 Container giống như một máy riêng biệt, cần login vào để sử dụng
 ```bash
 docker exec -it nfs-client-1 bash
@@ -18,7 +23,7 @@ hoặc
 docker exec -it nfs-client-2 bash
 ```
 
-# Copy file script vào container
+## Copy file script vào container
 Copy các file script trong máy thật vào container (đứng ở folder `NT132-Quan_Tri_Mang`):
 ```bash
 docker cp client-configs/manual-mount.sh nfs-client-1:/root/
@@ -113,4 +118,36 @@ Filesystem           Type  Size  Used Avail Use% Mounted on
   -> KHONG THE GHI (dung voi client chi duoc cap quyen ro / root_squash)
 
 De go mount: umount /mnt/nfs/share
+```
+
+# Dựng mount tự động - fstab
+
+Dọn mount cũ trên mỗi container để tránh xung đột
+```bash
+umount /mnt/nfs/share
+```
+
+## Chạy script cấu hình fstab
+
+```bash
+chmod +x /root/setup-fstab-automount.sh
+/root/setup-fstab-automount.sh rw
+```
+## Kiểm tra option mount
+```bash
+mount | grep nfs4
+```
+- Kiểm tra có rw/ro không.
+
+## Kiểm tra quyền đọc ghi
+
+- client-rw sẽ ghi thành công còn client-ro sẽ thất bại
+```bash
+echo "fstab-test-$(date +%s)" > /mnt/nfs/share/fstab-test.txt && echo "GHI THANH CONG" || echo "GHI THAT BAI"
+```
+
+- Tuy client-ro không ghi được file nhưng vẫn thấy file do client-rw tạo -> Cho thấy cả 2 đang dùng chung 1 folder
+```bash
+cat /mnt/nfs/share/fstab-test.txt
+ls -la /mnt/nfs/share/
 ```
