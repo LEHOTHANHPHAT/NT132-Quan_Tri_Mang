@@ -3,6 +3,8 @@ shared-data/public/*
 !shared-data/public/.gitkeep
 shared-data/restricted/*
 !shared-data/restricted/.gitkeep
+shared-data/v4recovery/*
+!shared-data/v4recovery/.gitkeep
 
 # Bỏ qua file kết quả benchmark và file test dung lượng lớn
 *.img
@@ -18,3 +20,5 @@ benchmarks/results/
 .DS_Store
 .vscode/
 .idea/
+__pycache__/
+*.pyc

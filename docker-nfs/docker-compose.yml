@@ -6,9 +6,21 @@ services:
     privileged: true
     ports:
       - "2049:2049"
+    environment:
+      - NFS_LEASE_TIME=10
+      - KEEPALIVED_STATE=MASTER
+      - KEEPALIVED_PRIORITY=100
+      - KEEPALIVED_INTERFACE=eth0
+      - KEEPALIVED_VRID=51
+      - KEEPALIVED_VIP=192.168.10.100/24
+      - KEEPALIVED_PASS=nt132ha
+      - KEEPALIVED_UNICAST_SRC=192.168.10.11
+      - KEEPALIVED_UNICAST_PEER=192.168.10.12
     volumes:
       - ../shared-data/public:/exports/share
       - ../shared-data/restricted:/exports/no_squash
+      - ../shared-data/v4recovery:/var/lib/nfs/v4recovery
+      - ../ha-cluster/scripts/check_nfs.sh:/usr/local/bin/check_nfs.sh:ro
       - /lib/modules:/lib/modules:ro
     networks:
       nfs-net:
@@ -19,9 +31,21 @@ services:
     container_name: nfs-ubuntu-node2
     hostname: nfs-node2
     privileged: true
+    environment:
+      - NFS_LEASE_TIME=10
+      - KEEPALIVED_STATE=BACKUP
+      - KEEPALIVED_PRIORITY=90
+      - KEEPALIVED_INTERFACE=eth0
+      - KEEPALIVED_VRID=51
+      - KEEPALIVED_VIP=192.168.10.100/24
+      - KEEPALIVED_PASS=nt132ha
+      - KEEPALIVED_UNICAST_SRC=192.168.10.12
+      - KEEPALIVED_UNICAST_PEER=192.168.10.11
     volumes:
       - ../shared-data/public:/exports/share
       - ../shared-data/restricted:/exports/no_squash
+      - ../shared-data/v4recovery:/var/lib/nfs/v4recovery
+      - ../ha-cluster/scripts/check_nfs.sh:/usr/local/bin/check_nfs.sh:ro
       - /lib/modules:/lib/modules:ro
     networks:
       nfs-net:
