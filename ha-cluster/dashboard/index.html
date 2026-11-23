@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NFSv4 HA Control Center — NT132.R12.ANTT</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --panel: #111a2e;
+      --panel-2: #17233b;
+      --border: #253554;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --blue: #38bdf8;
+      --violet: #a78bfa;
+      --font-sans: "Noto Sans", "SF Pro Text", "Adwaita Sans", "Liberation Sans", sans-serif;
+      --font-mono: "Noto Sans Mono", "Cascadia Mono", "SF Mono", "Liberation Mono", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--font-sans);
+      background: radial-gradient(circle at top right, #162442 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    .container {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 22px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: 0.2px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin-top: 3px;
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+    }
+
+    .pill.healthy {
+      border-color: rgba(16, 185, 129, 0.5);
+      color: #34d399;
+      background: rgba(16, 185, 129, 0.12);
+    }
+
+    .pill.failover {
+      border-color: rgba(245, 158, 11, 0.5);
+      color: #fbbf24;
+      background: rgba(245, 158, 11, 0.12);
+    }
+
+    .pill.degraded {
+      border-color: rgba(239, 68, 68, 0.5);
+      color: #f87171;
+      background: rgba(239, 68, 68, 0.12);
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+      margin-bottom: 18px;
+    }
+
+    .panel h2 {
+      margin: 0 0 12px 0;
+      font-size: 1rem;
+      color: #f8fafc;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .topology {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1.1fr auto 1fr;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 4px;
+    }
+
+    .topo-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .topo-box {
+      background: var(--panel-2);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      text-align: center;
+      transition: all 0.25s ease;
+    }
+
+    .topo-box.active-vip {
+      border-color: var(--green);
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+    }
+
+    .topo-box.offline {
+      border-color: rgba(239, 68, 68, 0.6);
+      opacity: 0.72;
+    }
+
+    .topo-box.vip-core {
+      border-color: var(--blue);
+      background: rgba(56, 189, 248, 0.08);
+    }
+
+    .topo-title {
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    .topo-sub {
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      margin-top: 2px;
+    }
+
+    .arrow {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 1.15rem;
+      text-align: center;
+    }
+
+    .arrow.active {
+      color: var(--green);
+    }
+
+    .kv-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 14px;
+      font-size: 0.85rem;
+    }
+
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: var(--panel-2);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .kv span:first-child {
+      color: var(--muted);
+    }
+
+    .kv strong {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tag.ok {
+      background: rgba(16, 185, 129, 0.18);
+      color: #34d399;
+    }
+
+    .tag.warn {
+      background: rgba(245, 158, 11, 0.18);
+      color: #fbbf24;
+    }
+
+    .tag.err {
+      background: rgba(239, 68, 68, 0.18);
+      color: #f87171;
+    }
+
+    .tag.info {
+      background: rgba(56, 189, 248, 0.18);
+      color: #38bdf8;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    button {
+      cursor: pointer;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 9px;
+      font-size: 0.84rem;
+      font-weight: 600;
+      transition: transform 0.08s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: var(--blue);
+      background: #1e2d4d;
+    }
+
+    button:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    button.danger {
+      border-color: rgba(239, 68, 68, 0.45);
+      background: rgba(239, 68, 68, 0.12);
+      color: #fca5a5;
+    }
+
+    button.danger:hover:not(:disabled) {
+      border-color: var(--red);
+      background: rgba(239, 68, 68, 0.22);
+    }
+
+    button.success {
+      border-color: rgba(16, 185, 129, 0.45);
+      background: rgba(16, 185, 129, 0.12);
+      color: #6ee7b7;
+    }
+
+    button.success:hover:not(:disabled) {
+      border-color: var(--green);
+      background: rgba(16, 185, 129, 0.22);
+    }
+
+    button.primary {
+      border-color: rgba(56, 189, 248, 0.5);
+      background: rgba(56, 189, 248, 0.14);
+      color: #7dd3fc;
+    }
+
+    button.primary:hover:not(:disabled) {
+      border-color: var(--blue);
+      background: rgba(56, 189, 248, 0.25);
+    }
+
+    .feedback {
+      margin-top: 10px;
+      font-size: 0.83rem;
+      color: var(--blue);
+      min-height: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    td.mono {
+      font-family: var(--font-mono);
+      word-break: break-all;
+    }
+
+    .terminal {
+      background: #060a14;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      height: 280px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.79rem;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 980px) {
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .topology {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow {
+        transform: rotate(90deg);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>NFSv4 High Availability — Control Center</h1>
+        <div class="subtitle">Cụm Keepalived VRRP (VRID 51) + Shared Storage</div>
+      </div>
+      <div class="header-meta">
+        <span id="vip-pill" class="pill"><span class="dot"></span> <span id="vip-pill-text">VIP:
+            192.168.10.100</span></span>
+        <span id="cluster-pill" class="pill healthy"><span class="dot"></span> <span id="cluster-pill-text">Đang
+            tải...</span></span>
+        <span id="clock-pill" class="pill">--:--:--</span>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>
+        <span>Sơ đồ Kiến trúc Thời gian thực (192.168.10.0/24)</span>
+        <span class="subtitle" id="task-indicator">Sẵn sàng</span>
+      </h2>
+      <div class="topology">
+        <div class="topo-col">
+          <div class="topo-box" id="topo-c1">
+            <div class="topo-title">Client 1 (RW)</div>
+            <div class="topo-sub">192.168.10.101</div>
+          </div>
+          <div class="topo-box" id="topo-c2">
+            <div class="topo-title">Client 2 (RO)</div>
+            <div class="topo-sub">192.168.10.102</div>
+          </div>
+        </div>
+        <div class="arrow" id="topo-arrow-clients">&rarr;</div>
+        <div class="topo-box vip-core">
+          <div class="topo-title">Virtual IP</div>
+          <div class="topo-sub">192.168.10.100:2049</div>
+          <div class="topo-sub" id="topo-vip-holder">Holder: --</div>
+        </div>
+        <div class="arrow active" id="topo-arrow-vip">&rarr;</div>
+        <div class="topo-col">
+          <div class="topo-box" id="topo-n1">
+            <div class="topo-title">nfs-node1 (MASTER / P100)</div>
+            <div class="topo-sub">192.168.10.11</div>
+          </div>
+          <div class="topo-box" id="topo-n2">
+            <div class="topo-title">nfs-node2 (BACKUP / P90)</div>
+            <div class="topo-sub">192.168.10.12</div>
+          </div>
+        </div>
+        <div class="arrow active">&harr;</div>
+        <div class="topo-box">
+          <div class="topo-title">Shared Storage</div>
+          <div class="topo-sub">/exports/share (fsid=1)</div>
+          <div class="topo-sub">/var/lib/nfs/v4recovery</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="panel" style="margin-bottom: 0;">
+        <h2><span>Node 1: nfs-ubuntu-node1 (192.168.10.11)</span><span id="n1-badge" class="tag info">--</span></h2>
+        <div class="kv-grid" id="n1-kv"></div>
+      </div>
+      <div class="panel" style="margin-bottom: 0;">
+        <h2><span>Node 2: nfs-ubuntu-node2 (192.168.10.12)</span><span id="n2-badge" class="tag info">--</span></h2>
+        <div class="kv-grid" id="n2-kv"></div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="panel" style="margin-bottom: 0;">
+        <h2><span>Client 1: nfs-client-1 (192.168.10.101)</span><span id="c1-badge" class="tag info">--</span></h2>
+        <div class="kv-grid" id="c1-kv"></div>
+      </div>
+      <div class="panel" style="margin-bottom: 0;">
+        <h2><span>Client 2: nfs-client-2 (192.168.10.102)</span><span id="c2-badge" class="tag info">--</span></h2>
+        <div class="kv-grid" id="c2-kv"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Bảng Điều khiển Chaos &amp; Kiểm thử Failover</h2>
+      <div class="controls">
+        <button class="primary" data-action="mount_clients" onclick="triggerAction('mount_clients')">Mount Clients qua
+          VIP</button>
+        <button data-action="setup_storage" onclick="triggerAction('setup_storage')">Kiểm tra Shared Storage</button>
+        <button class="danger" data-action="kill_nfs_node1" onclick="triggerAction('kill_nfs_node1')">Tắt dịch vụ NFS
+          Node 1</button>
+        <button class="success" data-action="restore_nfs_node1" onclick="triggerAction('restore_nfs_node1')">Khôi phục
+          NFS Node 1</button>
+        <button class="danger" data-action="stop_node1" onclick="triggerAction('stop_node1')">Stop Container Node
+          1</button>
+        <button class="success" data-action="start_node1" onclick="triggerAction('start_node1')">Start Container Node
+          1</button>
+        <button class="primary" data-action="test_service" onclick="triggerAction('test_service')">Chạy Test Failover
+          (Service)</button>
+        <button class="primary" data-action="test_hard" onclick="triggerAction('test_hard')">Chạy Test Failover
+          (Hard)</button>
+      </div>
+      <div class="feedback" id="action-feedback"></div>
+    </section>
+
+    <section class="grid-2">
+      <div class="panel" style="margin-bottom: 0;">
+        <h2>Tệp trong Shared Storage (/exports/share)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Tên tệp</th>
+              <th>Kích thước</th>
+              <th>SHA-256</th>
+            </tr>
+          </thead>
+          <tbody id="files-body"></tbody>
+        </table>
+      </div>
+      <div class="panel" style="margin-bottom: 0;">
+        <h2>Nhật ký Trực tiếp (RTO / RPO / Actions)</h2>
+        <div class="terminal" id="log-terminal"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    function makeKv(label, value) {
+      const box = document.createElement("div");
+      box.className = "kv";
+      const s = document.createElement("span");
+      s.textContent = label;
+      const v = document.createElement("strong");
+      v.textContent = value;
+      box.append(s, v);
+      return box;
+    }
+
+    function renderNode(prefix, node) {
+      const badge = document.getElementById(prefix + "-badge");
+      const kv = document.getElementById(prefix + "-kv");
+      kv.replaceChildren(
+        makeKv("Container", node.running ? "RUNNING" : "STOPPED"),
+        makeKv("Keepalived", node.role),
+        makeKv("Giữ VIP .100", node.has_vip ? "CÓ (ACTIVE)" : "KHÔNG"),
+        makeKv("check_nfs.sh", node.nfs_healthy ? "HEALTHY" : "UNHEALTHY"),
+        makeKv("nfsd threads", String(node.threads)),
+        makeKv("Port 2049", node.port_2049 ? "LISTEN" : "CLOSED"),
+        makeKv("Lease / Grace", node.lease_time != null ? `${node.lease_time}s / ${node.grace_time}s` : "--")
+      );
+      badge.textContent = node.has_vip ? `${node.role} + VIP` : node.role;
+      badge.className = "tag " + (node.has_vip ? "ok" : (node.nfs_healthy ? "info" : "err"));
+    }
+
+    function renderClient(prefix, client) {
+      const badge = document.getElementById(prefix + "-badge");
+      const kv = document.getElementById(prefix + "-kv");
+      kv.replaceChildren(
+        makeKv("Container", client.running ? "RUNNING" : "STOPPED"),
+        makeKv("Trạng thái Mount", client.mounted ? "MOUNTED" : "UNMOUNTED"),
+        makeKv("Nguồn Mount", client.mount_source || "--"),
+        makeKv("Chế độ thực tế", `${client.mount_mode.toUpperCase()} (kỳ vọng: ${client.expected_mode.toUpperCase()})`)
+      );
+      badge.textContent = client.mounted ? client.mount_mode.toUpperCase() : "CHƯA MOUNT";
+      badge.className = "tag " + (client.mounted ? (client.mount_mode === client.expected_mode ? "ok" : "warn") : "err");
+    }
+
+    function renderFiles(files) {
+      const body = document.getElementById("files-body");
+      if (!files.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 3;
+        td.textContent = "Chưa có tệp kiểm thử nào trong shared-data/public";
+        td.style.color = "#94a3b8";
+        tr.appendChild(td);
+        body.replaceChildren(tr);
+        return;
+      }
+      const rows = files.map((f) => {
+        const tr = document.createElement("tr");
+        const tdName = document.createElement("td");
+        tdName.className = "mono";
+        tdName.textContent = f.name;
+        const tdSize = document.createElement("td");
+        tdSize.textContent = `${f.size_bytes} B`;
+        const tdSha = document.createElement("td");
+        tdSha.className = "mono";
+        tdSha.textContent = f.sha256;
+        tr.append(tdName, tdSize, tdSha);
+        return tr;
+      });
+      body.replaceChildren(...rows);
+    }
+
+    let activeRefresh = null;
+
+    async function refreshStatus() {
+      if (activeRefresh) return activeRefresh;
+      activeRefresh = (async () => {
+        try {
+          const res = await fetch("/api/status", { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+
+          document.getElementById("clock-pill").textContent = data.timestamp;
+          const holder = data.cluster.vip_holder || "NONE";
+          document.getElementById("vip-pill-text").textContent = `VIP: ${data.cluster.vip} -> ${holder}`;
+          document.getElementById("topo-vip-holder").textContent = `Holder: ${holder}`;
+
+          const vipPill = document.getElementById("vip-pill");
+          const clusterPill = document.getElementById("cluster-pill");
+          const clusterPillText = document.getElementById("cluster-pill-text");
+          if (data.cluster.status === "HEALTHY") {
+            vipPill.className = "pill healthy";
+            clusterPill.className = "pill healthy";
+            clusterPillText.textContent = "CỤM ỔN ĐỊNH (MASTER: Node 1)";
+          } else if (data.cluster.status === "FAILOVER_ACTIVE") {
+            vipPill.className = "pill failover";
+            clusterPill.className = "pill failover";
+            clusterPillText.textContent = "ĐANG FAILOVER (MASTER: Node 2)";
+          } else {
+            vipPill.className = "pill degraded";
+            clusterPill.className = "pill degraded";
+            clusterPillText.textContent = "SUY GIẢM / LỖI CỤM";
+          }
+
+          const n1 = data.nodes.node1;
+          const n2 = data.nodes.node2;
+          const c1 = data.clients.client1;
+          const c2 = data.clients.client2;
+          renderNode("n1", n1);
+          renderNode("n2", n2);
+          renderClient("c1", c1);
+          renderClient("c2", c2);
+
+          const topoC1 = document.getElementById("topo-c1");
+          const topoC2 = document.getElementById("topo-c2");
+          topoC1.className = "topo-box" + (c1.running && c1.mounted ? " active-vip" : (!c1.running ? " offline" : ""));
+          topoC2.className = "topo-box" + (c2.running && c2.mounted ? " active-vip" : (!c2.running ? " offline" : ""));
+
+          const arrowClients = document.getElementById("topo-arrow-clients");
+          const anyMounted = (c1.running && c1.mounted) || (c2.running && c2.mounted);
+          arrowClients.className = "arrow" + (anyMounted ? " active" : "");
+
+          const arrowVip = document.getElementById("topo-arrow-vip");
+          const activeTarget = (n1.has_vip && n1.nfs_healthy) || (n2.has_vip && n2.nfs_healthy);
+          arrowVip.className = "arrow" + (activeTarget ? " active" : "");
+
+          const topoN1 = document.getElementById("topo-n1");
+          const topoN2 = document.getElementById("topo-n2");
+          topoN1.className = "topo-box" + (n1.has_vip ? " active-vip" : (!n1.running || !n1.nfs_healthy ? " offline" : ""));
+          topoN2.className = "topo-box" + (n2.has_vip ? " active-vip" : (!n2.running || !n2.nfs_healthy ? " offline" : ""));
+
+          renderFiles(data.shared_files);
+
+          const term = document.getElementById("log-terminal");
+          const nearBottom = term.scrollTop + term.clientHeight >= term.scrollHeight - 24;
+          term.textContent = (data.task.logs || []).join("\n");
+          if (nearBottom) term.scrollTop = term.scrollHeight;
+
+          const running = Boolean(data.task.running);
+          document.getElementById("task-indicator").textContent = running
+            ? `Đang chạy: ${data.task.action}...`
+            : "Sẵn sàng";
+          syncButtonState(running);
+        } catch (err) {
+          document.getElementById("action-feedback").textContent = "Mất kết nối tới server.py: " + err;
+        } finally {
+          activeRefresh = null;
+        }
+      })();
+      return activeRefresh;
+    }
+
+    let actionInFlight = false;
+    let lastTaskRunning = false;
+
+    function syncButtonState(taskRunning) {
+      lastTaskRunning = taskRunning;
+      const disabled = actionInFlight || taskRunning;
+      document.querySelectorAll(".controls button").forEach((btn) => {
+        btn.disabled = disabled;
+      });
+    }
+
+    async function triggerAction(action) {
+      if (actionInFlight) return;
+      actionInFlight = true;
+      syncButtonState(lastTaskRunning);
+      const fb = document.getElementById("action-feedback");
+      fb.textContent = `Đang gửi yêu cầu '${action}'...`;
+      try {
+        const res = await fetch("/api/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        const body = await res.json();
+        fb.textContent = body.message || body.error || `HTTP ${res.status}`;
+      } catch (err) {
+        fb.textContent = "Lỗi gọi API: " + err;
+      } finally {
+        actionInFlight = false;
+        await refreshStatus();
+      }
+    }
+
+    let pollTimer = null;
+
+    function scheduleNextPoll() {
+      if (pollTimer !== null) clearTimeout(pollTimer);
+      pollTimer = setTimeout(pollLoop, 1500);
+    }
+
+    async function pollLoop() {
+      try {
+        await refreshStatus();
+      } finally {
+        scheduleNextPoll();
+      }
+    }
+
+    pollLoop();
+  </script>
+</body>
+
+</html>
