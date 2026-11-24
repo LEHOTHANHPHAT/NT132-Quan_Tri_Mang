@@ -112,3 +112,9 @@ Kết quả `stat` trên Node 2:
 Hai tiến trình gửi yêu cầu ghi với UID/GID khác nhau. Trên Node 2,
 cả hai file đều thuộc `65534:65534`. Kết quả xác nhận `all_squash`
 đã ánh xạ cả hai danh tính client về cùng UID/GID ẩn danh.
+
+## 7. Kiểm tra ánh xạ UID/GID với no_root_squash
+/exports/no_squash 192.168.10.0/24(sync,wdelay,hide,no_subtree_check,fsid=2,sec=sys,rw,secure,no_root_squash,no_all_squash)
+192.168.10.12:/no_squash /mnt/nfs-no-root-squash-test
+uid=0(root) gid=0(root) groups=0(root)
+UID=0 GID=0 File=/exports/no_squash/tv2-no-root-squash-1795529313.txt
