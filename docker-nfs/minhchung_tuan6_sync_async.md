@@ -61,3 +61,54 @@ phép đo để xác định.
 Sau thử nghiệm, đã khôi phục `/etc/exports` trên Node 2, nạp lại
 bằng `exportfs -ra` và xác nhận dòng `/exports/share` của Client 1
 (`192.168.10.101`) đã trở lại `sync` bằng `exportfs -v`.
+
+## 6. Kiểm tra ánh xạ UID/GID với `all_squash`
+
+### Mục tiêu
+
+Kiểm tra liệu NFS Server có ánh xạ hai người dùng khác nhau trên
+Client 1 về cùng một UID/GID ẩn danh khi tạo file qua NFS.
+
+### Cách thực hiện
+
+- Node 2 (`192.168.10.12`) export thư mục thử `/exports/tv2-squash`
+  với quyền `rw` và tùy chọn `all_squash` cho Client 1
+  (`192.168.10.101`). UID/GID ẩn danh được đặt là `65534:65534`.
+- Lần thử đầu, thao tác tạo file báo `Read-only file system`.
+  Thư mục thử khi đó nằm cùng filesystem với gốc NFSv4 `/exports`.
+  Sau khi đặt thư mục thử trên một `tmpfs` riêng và mount lại,
+  cả hai tiến trình đều tạo file thành công.
+- Client 1 mount `192.168.10.12:/tv2-squash` tại
+  `/mnt/nfs-squash-test`. Hai tiến trình có UID/GID lần lượt là
+  `1001:1001` và `1002:1002`, mỗi tiến trình tạo một file.
+- Trên Node 2, dùng `stat -c '%u:%g %n'` để kiểm tra UID/GID
+  chủ sở hữu của hai file.
+
+### Kết quả
+
+Cấu hình export đang áp dụng trên Node 2:
+
+```text
+/exports/tv2-squash
+    192.168.10.101(sync,wdelay,hide,no_subtree_check,fsid=30,sec=sys,rw,secure,root_squash,all_squash)
+```
+
+Kết quả `id` trên Client 1:
+
+```text
+uid=1001 gid=1001 groups=1001
+uid=1002 gid=1002 groups=1002
+```
+
+Kết quả `stat` trên Node 2:
+
+```text
+65534:65534 /exports/tv2-squash/uid1001.txt
+65534:65534 /exports/tv2-squash/uid1002.txt
+```
+
+### Nhận xét
+
+Hai tiến trình gửi yêu cầu ghi với UID/GID khác nhau. Trên Node 2,
+cả hai file đều thuộc `65534:65534`. Kết quả xác nhận `all_squash`
+đã ánh xạ cả hai danh tính client về cùng UID/GID ẩn danh.
