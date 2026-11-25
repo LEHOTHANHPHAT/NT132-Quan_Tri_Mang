@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Web Control Center cho cụm NFSv4 High Availability (Quốc - NT132.R12.ANTT)."""
+"""Web Control Center cho cụm NFSv4 HA (GlusterFS Replica 2 + NFS-Ganesha + Keepalived) — Quốc - NT132.R12.ANTT."""
 
 import argparse
 from collections import deque
@@ -16,11 +16,13 @@ import threading
 DASHBOARD_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DASHBOARD_DIR.parent.parent
 INDEX_PATH = DASHBOARD_DIR / "index.html"
-PUBLIC_DIR = REPO_ROOT / "shared-data" / "public"
+BRICK1_SHARE_DIR = REPO_ROOT / "shared-data" / "bricks" / "node1" / "gv0" / "share"
+BRICK2_SHARE_DIR = REPO_ROOT / "shared-data" / "bricks" / "node2" / "gv0" / "share"
 SETUP_SCRIPT = REPO_ROOT / "ha-cluster" / "glusterfs-or-drbd" / "setup-shared-storage.sh"
 FAILOVER_SCRIPT = REPO_ROOT / "ha-cluster" / "scripts" / "failover-test.sh"
 
 VIP_ADDR = "192.168.10.100"
+VOL_NAME = "gv0"
 MOUNT_OPTS = "vers=4,hard,timeo=50,retrans=2,proto=tcp"
 
 NODES = [
@@ -70,7 +72,7 @@ def is_container_running(name: str) -> bool:
 def inspect_node(cfg: dict[str, object]) -> dict[str, object]:
     name = str(cfg["name"])
     running = is_container_running(name)
-    base = {
+    base: dict[str, object] = {
         "key": cfg["key"],
         "name": name,
         "ip": cfg["ip"],
@@ -80,10 +82,13 @@ def inspect_node(cfg: dict[str, object]) -> dict[str, object]:
         "has_vip": False,
         "role": "OFFLINE",
         "nfs_healthy": False,
-        "threads": 0,
+        "ganesha_running": False,
+        "glusterd_running": False,
+        "glusterfsd_running": False,
         "port_2049": False,
-        "lease_time": None,
-        "grace_time": None,
+        "lease_time": 10,
+        "grace_time": 10,
+        "graceless": True,
     }
     if not running:
         return base
@@ -91,11 +96,11 @@ def inspect_node(cfg: dict[str, object]) -> dict[str, object]:
     probe_sh = (
         f"vip=0; ip -4 addr show dev eth0 2>/dev/null | grep -qF 'inet {VIP_ADDR}/' && vip=1; "
         "chk=0; /usr/local/bin/check_nfs.sh >/dev/null 2>&1 && chk=1; "
-        "thr=$(tr -d '[:space:]' < /proc/fs/nfsd/threads 2>/dev/null || echo 0); "
+        "gan=0; pgrep -x ganesha.nfsd >/dev/null 2>&1 && gan=1; "
+        "gd=0; pgrep -x glusterd >/dev/null 2>&1 && gd=1; "
+        "gfsd=0; pgrep -x glusterfsd >/dev/null 2>&1 && gfsd=1; "
         "p2049=0; ss -ltn 2>/dev/null | grep -qE '[:.]2049([[:space:]]|$)' && p2049=1; "
-        "lt=$(tr -d '[:space:]' < /proc/fs/nfsd/nfsv4leasetime 2>/dev/null || echo ''); "
-        "gt=$(tr -d '[:space:]' < /proc/fs/nfsd/nfsv4gracetime 2>/dev/null || echo ''); "
-        "printf '%s|%s|%s|%s|%s|%s\\n' \"$vip\" \"$chk\" \"${thr:-0}\" \"$p2049\" \"$lt\" \"$gt\""
+        "printf '%s|%s|%s|%s|%s|%s\\n' \"$vip\" \"$chk\" \"$gan\" \"$gd\" \"$gfsd\" \"$p2049\""
     )
     rc, out, _ = run_cmd(["docker", "exec", name, "sh", "-c", probe_sh], timeout=2.0)
     if rc != 0 or "|" not in out:
@@ -107,10 +112,10 @@ def inspect_node(cfg: dict[str, object]) -> dict[str, object]:
 
     has_vip = parts[0] == "1"
     nfs_healthy = parts[1] == "1"
-    threads = int(parts[2]) if parts[2].isdigit() else 0
-    port_2049 = parts[3] == "1"
-    lease_time = int(parts[4]) if parts[4].isdigit() else None
-    grace_time = int(parts[5]) if parts[5].isdigit() else None
+    ganesha_running = parts[2] == "1"
+    glusterd_running = parts[3] == "1"
+    glusterfsd_running = parts[4] == "1"
+    port_2049 = parts[5] == "1"
 
     if has_vip:
         role = "MASTER"
@@ -124,19 +129,86 @@ def inspect_node(cfg: dict[str, object]) -> dict[str, object]:
             "has_vip": has_vip,
             "role": role,
             "nfs_healthy": nfs_healthy,
-            "threads": threads,
+            "ganesha_running": ganesha_running,
+            "glusterd_running": glusterd_running,
+            "glusterfsd_running": glusterfsd_running,
             "port_2049": port_2049,
-            "lease_time": lease_time,
-            "grace_time": grace_time,
         }
     )
     return base
 
 
+def inspect_gluster(nodes: list[dict[str, object]]) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "volume": VOL_NAME,
+        "status": "OFFLINE",
+        "online_bricks": 0,
+        "total_bricks": 2,
+        "peer_connected": False,
+        "pending_heal": None,
+    }
+    target_node = next((str(n["name"]) for n in nodes if n["running"] and n["glusterd_running"]), None)
+    if not target_node:
+        return summary
+
+    probe_sh = (
+        f"gluster volume status {VOL_NAME} 2>/dev/null || echo '__VOL_ERR__'; "
+        "echo '__PEER_SEP__'; "
+        "gluster peer status 2>/dev/null || true"
+    )
+    rc, out, _ = run_cmd(["docker", "exec", target_node, "sh", "-c", probe_sh], timeout=3.0)
+    if rc != 0 or "__PEER_SEP__" not in out:
+        return summary
+
+    vol_out, peer_out = out.split("__PEER_SEP__", 1)
+    online_bricks = 0
+    total_bricks = 0
+    if "__VOL_ERR__" not in vol_out:
+        for line in vol_out.splitlines():
+            if line.startswith("Brick "):
+                total_bricks += 1
+                tokens = line.split()
+                if len(tokens) >= 2 and tokens[-2] == "Y":
+                    online_bricks += 1
+
+    peer_connected = "State: Peer in Cluster (Connected)" in peer_out
+    if total_bricks == 0:
+        vol_status = "NOT_CREATED"
+    elif online_bricks >= 2 and peer_connected:
+        vol_status = "HEALTHY"
+    elif online_bricks >= 1:
+        vol_status = "DEGRADED"
+    else:
+        vol_status = "OFFLINE"
+
+    pending_heal: int | None = None
+    if online_bricks >= 2 and peer_connected:
+        rc_h, heal_out, _ = run_cmd(
+            ["docker", "exec", target_node, "gluster", "volume", "heal", VOL_NAME, "info"],
+            timeout=3.0,
+        )
+        if rc_h == 0 and heal_out:
+            connected_bricks = len(re.findall(r"^Status:\s*Connected$", heal_out, re.MULTILINE))
+            counts = [int(m.group(1)) for m in re.finditer(r"^Number of entries:\s*(\d+)", heal_out, re.MULTILINE)]
+            if connected_bricks >= 2 and counts:
+                pending_heal = sum(counts)
+
+    summary.update(
+        {
+            "status": vol_status,
+            "online_bricks": online_bricks,
+            "total_bricks": max(total_bricks, 2),
+            "peer_connected": peer_connected,
+            "pending_heal": pending_heal,
+        }
+    )
+    return summary
+
+
 def inspect_client(cfg: dict[str, object]) -> dict[str, object]:
     name = str(cfg["name"])
     running = is_container_running(name)
-    base = {
+    base: dict[str, object] = {
         "key": cfg["key"],
         "name": name,
         "ip": cfg["ip"],
@@ -174,8 +246,8 @@ def inspect_client(cfg: dict[str, object]) -> dict[str, object]:
 
 
 def get_file_sha256(path: Path, size: int, mtime_ns: int) -> str:
-    """Return cached SHA-256 hex digest when (size, mtime_ns) is unchanged."""
-    key = path.name
+    """Return cached SHA-256 hex digest keyed by full path when (size, mtime_ns) is unchanged."""
+    key = str(path)
     with _SHA256_CACHE_LOCK:
         cached = _SHA256_CACHE.get(key)
         if cached and cached[0] == size and cached[1] == mtime_ns:
@@ -192,45 +264,79 @@ def get_file_sha256(path: Path, size: int, mtime_ns: int) -> str:
     return hex_digest
 
 
-def list_shared_files() -> list[dict[str, object]]:
-    if not PUBLIC_DIR.is_dir():
-        return []
-    entries: list[tuple[float, dict[str, object]]] = []
-    seen_names: set[str] = set()
+def _scan_brick_dir(brick_dir: Path, live_paths: set[str]) -> dict[str, tuple[float, int, str]]:
+    found: dict[str, tuple[float, int, str]] = {}
+    if not brick_dir.is_dir():
+        return found
     try:
-        for path in PUBLIC_DIR.iterdir():
-            if path.name == ".gitkeep" or not path.is_file() or path.is_symlink():
+        for path in brick_dir.iterdir():
+            if path.name.startswith(".") or not path.is_file() or path.is_symlink():
                 continue
             try:
                 stat = path.stat()
-                seen_names.add(path.name)
-                sha256_hex = get_file_sha256(path, stat.st_size, stat.st_mtime_ns)
-                entries.append(
-                    (
-                        stat.st_mtime,
-                        {
-                            "name": path.name,
-                            "size_bytes": stat.st_size,
-                            "sha256": sha256_hex,
-                            "mtime": datetime.fromtimestamp(stat.st_mtime).strftime("%H:%M:%S %d/%m"),
-                        },
-                    )
-                )
+                live_paths.add(str(path))
+                sha_hex = get_file_sha256(path, stat.st_size, stat.st_mtime_ns)
+                found[path.name] = (stat.st_mtime, stat.st_size, sha_hex)
             except OSError:
                 continue
     except OSError:
-        return []
+        return {}
+    return found
+
+
+def list_brick_comparison() -> list[dict[str, object]]:
+    live_paths: set[str] = set()
+    b1_map = _scan_brick_dir(BRICK1_SHARE_DIR, live_paths)
+    b2_map = _scan_brick_dir(BRICK2_SHARE_DIR, live_paths)
+
     with _SHA256_CACHE_LOCK:
-        stale = [k for k in _SHA256_CACHE if k not in seen_names]
+        stale = [k for k in _SHA256_CACHE if k not in live_paths]
         for k in stale:
             del _SHA256_CACHE[k]
-    entries.sort(key=lambda item: item[0], reverse=True)
-    return [item[1] for item in entries[:20]]
+
+    rows: list[tuple[float, dict[str, object]]] = []
+    for fname in set(b1_map) | set(b2_map):
+        b1 = b1_map.get(fname)
+        b2 = b2_map.get(fname)
+        if b1 and b2:
+            sync_state = "SYNCED" if b1[2] == b2[2] else "MISMATCH"
+        elif b2:
+            sync_state = "BRICK2_ONLY"
+        else:
+            sync_state = "BRICK1_ONLY"
+
+        mtime_val = max(b1[0] if b1 else 0.0, b2[0] if b2 else 0.0)
+        size_val = b2[1] if b2 else (b1[1] if b1 else 0)
+        rows.append(
+            (
+                mtime_val,
+                {
+                    "name": fname,
+                    "size_bytes": size_val,
+                    "mtime": datetime.fromtimestamp(mtime_val).strftime("%H:%M:%S %d/%m"),
+                    "brick1": {
+                        "exists": b1 is not None,
+                        "size_bytes": b1[1] if b1 else None,
+                        "sha256": b1[2] if b1 else None,
+                    },
+                    "brick2": {
+                        "exists": b2 is not None,
+                        "size_bytes": b2[1] if b2 else None,
+                        "sha256": b2[2] if b2 else None,
+                    },
+                    "sync_state": sync_state,
+                },
+            )
+        )
+
+    rows.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in rows[:20]]
 
 
 def collect_status() -> dict[str, object]:
     nodes = [inspect_node(cfg) for cfg in NODES]
     clients = [inspect_client(cfg) for cfg in CLIENTS]
+    gluster = inspect_gluster(nodes)
 
     vip_holders = [str(n["name"]) for n in nodes if n["has_vip"]]
     vip_holder = vip_holders[0] if len(vip_holders) == 1 else (",".join(vip_holders) if vip_holders else None)
@@ -258,9 +364,10 @@ def collect_status() -> dict[str, object]:
             "vip_holder": vip_holder,
             "status": cluster_status,
         },
+        "gluster": gluster,
         "nodes": {str(n["key"]): n for n in nodes},
         "clients": {str(c["key"]): c for c in clients},
-        "shared_files": list_shared_files(),
+        "brick_files": list_brick_comparison(),
         "task": task_snapshot,
     }
 
@@ -333,11 +440,11 @@ def execute_sync_action(action: str) -> tuple[bool, str]:
                 "nfs-ubuntu-node1",
                 "sh",
                 "-c",
-                "touch /run/nfs_fault_inject && rpc.nfsd 0 && exportfs -ua",
+                "touch /run/nfs_fault_inject && /usr/local/sbin/ganesha-ctl.sh stop",
             ],
-            timeout=5.0,
+            timeout=6.0,
         )
-        return (rc == 0), ("Da ngat dich vu NFS tren nfs-ubuntu-node1 (Service Failure)" if rc == 0 else err)
+        return (rc == 0), ("Da ngat dich vu NFS-Ganesha tren nfs-ubuntu-node1 (Service Failure)" if rc == 0 else err)
 
     if action == "restore_nfs_node1":
         if not is_container_running("nfs-ubuntu-node1"):
@@ -349,19 +456,27 @@ def execute_sync_action(action: str) -> tuple[bool, str]:
                 "nfs-ubuntu-node1",
                 "sh",
                 "-c",
-                "rm -f /run/nfs_fault_inject && exportfs -rv && rpc.nfsd -V 4 -N 3 8",
+                "rm -f /run/nfs_fault_inject && /usr/local/sbin/ganesha-ctl.sh start",
             ],
-            timeout=5.0,
+            timeout=20.0,
         )
-        return (rc == 0), ("Da khoi phuc dich vu NFS tren nfs-ubuntu-node1" if rc == 0 else err)
+        return (rc == 0), ("Da khoi phuc dich vu NFS-Ganesha tren nfs-ubuntu-node1" if rc == 0 else err)
 
     if action == "stop_node1":
         rc, _, err = run_cmd(["docker", "stop", "-t", "5", "nfs-ubuntu-node1"], timeout=12.0)
         return (rc == 0), ("Da dung dot ngot container nfs-ubuntu-node1 (Hard Failure)" if rc == 0 else err)
 
     if action == "start_node1":
-        rc, _, err = run_cmd(["docker", "start", "nfs-ubuntu-node1"], timeout=10.0)
-        return (rc == 0), ("Da khoi dong lai container nfs-ubuntu-node1 (Failback)" if rc == 0 else err)
+        rc, _, err = run_cmd(["docker", "start", "nfs-ubuntu-node1"], timeout=15.0)
+        return (rc == 0), ("Da khoi dong lai container nfs-ubuntu-node1 (Failback + Self-Heal)" if rc == 0 else err)
+
+    if action == "trigger_heal":
+        target = next((str(c["name"]) for c in NODES if is_container_running(str(c["name"]))), None)
+        if not target:
+            return False, "Ca 2 Node GlusterFS dang tat"
+        rc, out, err = run_cmd(["docker", "exec", target, "gluster", "volume", "heal", VOL_NAME], timeout=8.0)
+        msg = out or err or "Da kich hoat Self-Heal"
+        return (rc == 0), (f"[{target}] {msg}" if rc == 0 else f"[{target}] {msg}")
 
     return False, f"Action khong ho tro: {action}"
 
@@ -371,7 +486,14 @@ ASYNC_SCRIPTS = {
     "test_service": ["bash", str(FAILOVER_SCRIPT), "--mode", "service"],
     "test_hard": ["bash", str(FAILOVER_SCRIPT), "--mode", "hard"],
 }
-SYNC_ACTIONS = {"mount_clients", "kill_nfs_node1", "restore_nfs_node1", "stop_node1", "start_node1"}
+SYNC_ACTIONS = {
+    "mount_clients",
+    "kill_nfs_node1",
+    "restore_nfs_node1",
+    "stop_node1",
+    "start_node1",
+    "trigger_heal",
+}
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
