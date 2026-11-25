@@ -1,0 +1,75 @@
+services:
+  nfs-node1:
+    build: ./gluster-ganesha
+    container_name: nfs-ubuntu-node1
+    hostname: nfs-node1
+    privileged: true
+    environment:
+      - KEEPALIVED_STATE=MASTER
+      - KEEPALIVED_PRIORITY=100
+      - KEEPALIVED_INTERFACE=eth0
+      - KEEPALIVED_VRID=51
+      - KEEPALIVED_VIP=192.168.10.100/24
+      - KEEPALIVED_PASS=nt132ha
+      - KEEPALIVED_UNICAST_SRC=192.168.10.11
+      - KEEPALIVED_UNICAST_PEER=192.168.10.12
+    volumes:
+      - ../shared-data/bricks/node1:/data/brick
+      - glusterd-node1:/var/lib/glusterd
+      - ./scripts/check_nfs.sh:/usr/local/bin/check_nfs.sh:ro
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.11
+
+  nfs-node2:
+    build: ./gluster-ganesha
+    container_name: nfs-ubuntu-node2
+    hostname: nfs-node2
+    privileged: true
+    environment:
+      - KEEPALIVED_STATE=BACKUP
+      - KEEPALIVED_PRIORITY=90
+      - KEEPALIVED_INTERFACE=eth0
+      - KEEPALIVED_VRID=51
+      - KEEPALIVED_VIP=192.168.10.100/24
+      - KEEPALIVED_PASS=nt132ha
+      - KEEPALIVED_UNICAST_SRC=192.168.10.12
+      - KEEPALIVED_UNICAST_PEER=192.168.10.11
+    volumes:
+      - ../shared-data/bricks/node2:/data/brick
+      - glusterd-node2:/var/lib/glusterd
+      - ./scripts/check_nfs.sh:/usr/local/bin/check_nfs.sh:ro
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.12
+
+  client-rw:
+    build: ./gluster-ganesha
+    container_name: nfs-client-1
+    hostname: client-1
+    privileged: true
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.101
+
+  client-ro:
+    build: ./gluster-ganesha
+    container_name: nfs-client-2
+    hostname: client-2
+    privileged: true
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      nfs-net:
+        ipv4_address: 192.168.10.102
+
+volumes:
+  glusterd-node1:
+  glusterd-node2:
+
+networks:
+  nfs-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.10.0/24
