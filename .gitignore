@@ -3,8 +3,8 @@ shared-data/public/*
 !shared-data/public/.gitkeep
 shared-data/restricted/*
 !shared-data/restricted/.gitkeep
-shared-data/v4recovery/*
-!shared-data/v4recovery/.gitkeep
+shared-data/bricks/*
+!shared-data/bricks/.gitkeep
 
 # Bỏ qua file kết quả benchmark và file test dung lượng lớn
 *.img
