@@ -1,0 +1,11 @@
+cat > mnt-nfs-share.automount << 'EOF'
+[Unit]
+Description=Automount NFSv4 share tu TV2 khi co truy cap
+
+[Automount]
+Where=/mnt/nfs/share
+TimeoutIdleSec=600
+
+[Install]
+WantedBy=multi-user.target
+EOF

@@ -1,0 +1,20 @@
+mkdir -p ~/NT132-Quan_Tri_Mang/client-configs/systemd
+cd ~/NT132-Quan_Tri_Mang/client-configs/systemd
+
+cat > mnt-nfs-share.mount << 'EOF'
+[Unit]
+Description=NFSv4 mount toi NFS Server cua TV2 (/exports/share)
+After=network-online.target rpc-statd.service
+Wants=network-online.target
+Requires=rpc-statd.service
+
+[Mount]
+What=192.168.10.11:/share
+Where=/mnt/nfs/share
+Type=nfs4
+Options=rw,vers=4.2,sec=sys,hard,intr
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
