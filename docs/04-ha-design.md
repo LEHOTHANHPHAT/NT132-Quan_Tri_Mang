@@ -1,32 +1,36 @@
 # Thiết kế Kiến trúc Cụm NFS Server High Availability (HA)
 
+- **Môn học / Lớp:** `NT132.R12.ANTT` — Quản trị mạng
 - **Đề tài:** Tìm hiểu và Triển khai Hệ thống Network File System (NFS) & High Availability
 - **Tài liệu nền tảng lý thuyết:** [04-ha-theory.md](./04-ha-theory.md)
-- **Thư mục mã nguồn liên quan:** `docker-nfs/`, `ha-cluster/`
+- **Thư mục mã nguồn liên quan:** `ha-cluster/` (độc lập với stack cơ sở `docker-nfs/`)
 - **Nhánh Git thực hiện:** `feat/nfs-ha-cluster`
 
 ---
 
 ## 1. Mục tiêu Thiết kế và Lựa chọn Giải pháp cho Cụm Lab
 
-Dựa trên nền tảng lý thuyết đã phân tích tại [04-ha-theory.md](./04-ha-theory.md), kiến trúc cụm NFS HA của nhóm được thiết kế nhằm giải quyết triệt để điểm lỗi đơn (SPOF) trên `nfs-node1` bằng các lựa chọn kỹ thuật cụ thể sau:
+Dựa trên nền tảng lý thuyết đã phân tích tại [04-ha-theory.md](./04-ha-theory.md), kiến trúc cụm NFS HA của nhóm được thiết kế nhằm loại bỏ hoàn toàn điểm lỗi đơn (SPOF) trên `nfs-node1` và thực thi **nhân bản dữ liệu hai chiều qua mạng** giữa hai máy chủ lưu trữ độc lập:
 
-1. **Mô hình cụm Active-Passive (2 Node):**
-   - `nfs-node1` (`192.168.10.11`) đóng vai trò **MASTER**, `nfs-node2` (`192.168.10.12`) đóng vai trò **BACKUP**.
-   - Tại một thời điểm chỉ một Node tiếp nhận kết nối ghi từ Client thông qua **Virtual IP (`192.168.10.100`)**, đảm bảo tương thích 100% với `nfs-kernel-server` (NFSv4) và ngăn ngừa xung đột khóa file / Split-Brain.
-2. **Tầng Quản lý Cụm & VIP — Keepalived (VRRP):**
-   - Sử dụng **Keepalived** (`virtual_router_id 51`, `advert_int 1s`) kết hợp script kiểm tra sức khỏe dịch vụ `ha-cluster/scripts/check_nfs.sh` và cơ chế **Gratuitous ARP (GARP)** để chuyển dịch VIP `192.168.10.100` gọn nhẹ ngay bên trong container Ubuntu 22.04.
-3. **Tầng Lưu trữ & Giữ Trạng thái — Shared Storage + Đồng bộ Metadata NFSv4:**
-   - Hai Node cùng ánh xạ vào vùng lưu trữ chia sẻ (`shared-data/public` và `shared-data/restricted`), cố định `fsid=0,1,2` trong `/etc/exports` để File Handle đồng nhất tuyệt đối.
-   - Đồng bộ thư mục `/var/lib/nfs/v4recovery` và tinh chỉnh `nfsv4leasetime` / `nfsv4gracetime` xuống `10` giây qua script `ha-cluster/glusterfs-or-drbd/setup-shared-storage.sh`.
+1. **Tầng Lưu trữ Phân tán — GlusterFS 10.1 (`replica 2`) trên 2 Brick cô lập:**
+   - `nfs-ubuntu-node1` (`192.168.10.11`) ánh xạ độc lập thư mục ext4 host `shared-data/bricks/node1` vào `/data/brick`.
+   - `nfs-ubuntu-node2` (`192.168.10.12`) ánh xạ độc lập thư mục ext4 host `shared-data/bricks/node2` vào `/data/brick` (tuyệt đối không mount chéo).
+   - Volume phân tán `gv0` (`replica 2`) nhân bản đồng bộ mọi tệp trong `/share` và `/no_squash` qua mạng bridge `192.168.10.0/24`, hỗ trợ **Automatic Self-Heal Daemon (`shd`)** tự động đồng bộ bù dữ liệu khi một Node khởi động lại sau sự cố.
+2. **Tầng Phục vụ NFSv4 — User-Space NFS-Ganesha 3.5 (`FSAL_GLUSTER` qua `libgfapi`):**
+   - Cả hai Node chạy sẵn `ganesha.nfsd` ở chế độ Hot-Standby kết nối trực tiếp vào volume `gv0` bằng `libgfapi` (`FSAL { Name = GLUSTER; }`), bỏ qua hoàn toàn tầng FUSE trung gian và kernel `nfsd`.
+   - NFS File Handle được sinh từ **GlusterFS GFID (UUID)** đồng nhất tuyệt đối giữa hai Node dù inode ext4 trên Brick 1 và Brick 2 hoàn toàn khác nhau, loại bỏ lỗi `Stale file handle (ESTALE)` khi chuyển mạch.
+   - Bảo toàn trọn vẹn cấu hình phân quyền của nhóm: `/share` (`Export_Id = 1`, `RW` cho `192.168.10.101`, `RO` cho `192.168.10.0/24`, `Root_Squash` $\rightarrow$ `65534:65534`) và `/no_squash` (`Export_Id = 2`, `RW` cho `192.168.10.0/24`, `No_Root_Squash` $\rightarrow$ `0:0`).
+3. **Tầng Quản lý Cụm & VIP — Keepalived (VRRP Unicast):**
+   - Sử dụng **Keepalived** (`VI_NFS`, `VRID 51`, `advert_int 1s`) kết hợp script kiểm tra sức khỏe tốc độ cao `< 50 ms` ([check_nfs.sh](../ha-cluster/scripts/check_nfs.sh)) và **Gratuitous ARP (GARP)** để chuyển dịch Virtual IP `192.168.10.100/24` giữa `nfs-ubuntu-node1` và `nfs-ubuntu-node2`.
 
 ### Chỉ tiêu mục tiêu thiết kế
 
-| Chỉ số | Mục tiêu thiết kế | Cơ chế bảo đảm |
-| :--- | :--- | :--- |
-| **RTO (Thời gian chuyển mạch)** | **< 5 giây** | Chu kỳ VRRP `advert_int 1s` (`~3s` phát hiện node chết) + `check_nfs.sh` kiểm tra mỗi `1s` (`fall 2`) + GARP làm mới ARP tức thời. |
-| **RPO (Mất mát dữ liệu)** | **0 (Không mất dữ liệu)** | Ghi đồng bộ `sync` trên export + Shared Storage dùng chung trực tiếp giữa hai Node. |
-| **Tính liên tục của Client** | Không phải `umount`/`mount` lại | Client mount qua VIP `192.168.10.100:/share` với cờ `vers=4,hard,timeo=50,retrans=2,proto=tcp`. |
+| Chỉ số | Mục tiêu thiết kế | Kết quả thực nghiệm đạt được | Cơ chế bảo đảm |
+| :--- | :--- | :--- | :--- |
+| **VIP Takeover RTO (Service Failure)** | **< 5 giây** | **~2.0–2.5 giây** | `/run/nfs_fault_inject` + `ganesha-ctl.sh stop` $\rightarrow$ `chk_nfs` (`interval 1s, fall 2`) đưa Node 1 về `FAULT` và phát VRRP priority `0`. |
+| **VIP Takeover RTO (Hard Failure)** | **< 5 giây** | **~3.5–4.3 giây** | `docker stop -t 5` thu hồi VIP sạch sẽ hoặc VRRP `Master_Down_Interval` + GARP `garp_master_delay 1`. |
+| **RPO (Mất mát dữ liệu)** | **0 (Không mất dữ liệu)** | **0 (`20/20` dòng, SHA-256 khớp 100%)** | GlusterFS AFR ghi đồng bộ + Client mount `hard,timeo=50,retrans=2`. |
+| **Self-Heal sau sập nguồn** | **Tự động khớp 100%** | **~0.2–0.5 giây** (`0` entries) | GlusterFS `shd` tự đối chiếu xattr `trusted.afr.*` khi Node 1 quay lại và vá đầy đủ dữ liệu ghi lúc offline. |
 
 ---
 
@@ -34,7 +38,7 @@ Dựa trên nền tảng lý thuyết đã phân tích tại [04-ha-theory.md](.
 
 ### 2.1. Sơ đồ Kiến trúc Tổng thể
 
-Kiến trúc cụm HA kế thừa hoàn toàn subnet `192.168.10.0/24` (bridge `nfs-net`) từ `docker-nfs/docker-compose.yml` và bổ sung tầng Virtual IP `192.168.10.100/24`:
+Stack HA được đóng gói tự chủ tại [ha-cluster/docker-compose.yml](../ha-cluster/docker-compose.yml) trên mạng bridge `nfs-net` (`192.168.10.0/24`), tách biệt hoàn toàn với cấu hình cơ sở trong `docker-nfs/`:
 
 ```mermaid
 flowchart TD
@@ -42,23 +46,29 @@ flowchart TD
     C2["Client 2: nfs-client-2 (192.168.10.102) - Quyen ro"]
     VIP["Virtual IP Keepalived: 192.168.10.100/24 (TCP Port 2049)"]
 
-    subgraph HA["Cum NFS Server HA (Bridge: nfs-net 192.168.10.0/24)"]
-        N1["Node 1: nfs-ubuntu-node1 (192.168.10.11) - MASTER (Priority 100) + check_nfs.sh"]
-        N2["Node 2: nfs-ubuntu-node2 (192.168.10.12) - BACKUP (Priority 90) + check_nfs.sh"]
-        N1 <-->|"VRRP Heartbeat (advert_int 1s)"| N2
+    subgraph HA["Cum NFS HA - Docker Bridge nfs-net (192.168.10.0/24)"]
+        N1["Node 1: nfs-ubuntu-node1 (192.168.10.11) - MASTER P100 + Ganesha + glusterd"]
+        N2["Node 2: nfs-ubuntu-node2 (192.168.10.12) - BACKUP P90 + Ganesha + glusterd"]
+        K["VRRP Unicast (advert_int 1s) + check_nfs.sh"]
+        G["GlusterFS Volume gv0 (replica 2, AFR + Self-Heal Daemon)"]
+        N1 <--> K
+        K <--> N2
+        N1 <--> G
+        G <--> N2
     end
 
-    ST["Shared Storage & State Sync (/exports/share, /exports/no_squash, /var/lib/nfs/v4recovery)"]
+    B1["Brick 1 ext4 doc lap (shared-data/bricks/node1/gv0)"]
+    B2["Brick 2 ext4 doc lap (shared-data/bricks/node2/gv0)"]
 
     C1 -->|"mount -t nfs4 192.168.10.100:/share"| VIP
     C2 -->|"mount -t nfs4 192.168.10.100:/share"| VIP
-    VIP -->|"Active (Binh thuong)"| N1
-    VIP -.->|"Failover (Khi Node 1 loi)"| N2
-    N1 <--> ST
-    N2 <--> ST
+    VIP -->|"Active (MASTER)"| N1
+    VIP -.->|"Failover < 5s"| N2
+    N1 --> B1
+    N2 --> B2
 ```
 
-Sơ đồ chi tiết kết nối mạng, cổng giao thức và tầng lưu trữ dùng chung:
+Sơ đồ chi tiết các tầng dịch vụ và kho lưu trữ cô lập giữa hai Node:
 
 ```text
 +-----------------------------------+       +-----------------------------------+
@@ -68,7 +78,7 @@ Sơ đồ chi tiết kết nối mạng, cổng giao thức và tầng lưu tr�
 +-----------------+-----------------+       +-----------------+-----------------+
                   |                                           |
                   +---------------------+---------------------+
-                                        |  NFSv4 (TCP Port 2049)
+                                        |  NFSv4.0 (TCP Port 2049)
                                         v
                         [ Virtual IP (VIP): 192.168.10.100 ]
                         [   Keepalived VRRP - VRID: 51     ]
@@ -81,78 +91,80 @@ Sơ đồ chi tiết kết nối mạng, cổng giao thức và tầng lưu tr�
 |     nfs-ubuntu-node1      | <=========================> |     nfs-ubuntu-node2      |
 |    IP: 192.168.10.11      |     (Gratuitous ARP)        |    IP: 192.168.10.12      |
 |  Keepalived + check_nfs   |                             |  Keepalived + check_nfs   |
-|  NFSv4 (fsid=0,1,2)       |                             |  NFSv4 (fsid=0,1,2)       |
-+-------------+-------------+                             +-------------+-------------+
+|  NFS-Ganesha FSAL_GLUSTER |     GlusterFS Replica 2     |  NFS-Ganesha FSAL_GLUSTER |
+|  glusterd + glusterfsd    | <=========================> |  glusterd + glusterfsd    |
++-------------+-------------+    (AFR Sync + Self-Heal)   +-------------+-------------+
               |                                                         |
-              +------- Shared Storage / Đồng bộ dữ liệu & State --------+
-              |  - Dữ liệu: /exports/share (public), /exports/no_squash |
-              |  - Trạng thái NFSv4: /var/lib/nfs/v4recovery            |
-              +---------------------------------------------------------+
+              v                                                         v
++---------------------------+                             +---------------------------+
+| Brick 1 (ext4 doc lap)    |                             | Brick 2 (ext4 doc lap)    |
+| shared-data/bricks/node1  |                             | shared-data/bricks/node2  |
+|   -> /data/brick/gv0      |                             |   -> /data/brick/gv0      |
++---------------------------+                             +---------------------------+
 ```
 
-### 2.2. Bảng Quy hoạch Địa chỉ IP, Vai trò và Cấu hình Export
+### 2.2. Bảng Quy hoạch Địa chỉ IP, Vai trò và Brick Lưu trữ
 
-| Thành phần | Tên Container / Hostname | Địa chỉ IP | Vai trò trong cụm HA | Cổng / Giao thức | Quyền Export / Ghi chú |
+| Thành phần | Tên Container / Hostname | Địa chỉ IP | Vai trò trong cụm HA | Lưu trữ & Cổng | Quyền Export / Ghi chú |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Mạng Docker** | `nfs-net` (bridge) | `192.168.10.0/24` | Mạng nội bộ kết nối Server & Client | Layer 2/3 Bridge | Toàn bộ container và VIP nằm cùng lớp mạng `/24`. |
-| **Virtual IP (VIP)** | — | `192.168.10.100/24` | Địa chỉ dịch vụ duy nhất cho Client mount | `TCP 2049` (NFSv4) | Do Keepalived gán động lên `eth0` của Node đang giữ quyền `MASTER`. |
-| **NFS Server Node 1** | `nfs-ubuntu-node1` (`nfs-node1`) | `192.168.10.11` | Keepalived **MASTER** (`priority 100`) | `TCP 2049`, `IP Proto 112` (VRRP) | Export `/exports` (`fsid=0`), `/exports/share` (`fsid=1`), `/exports/no_squash` (`fsid=2`). |
-| **NFS Server Node 2** | `nfs-ubuntu-node2` (`nfs-node2`) | `192.168.10.12` | Keepalived **BACKUP** (`priority 90`) | `TCP 2049`, `IP Proto 112` (VRRP) | Cấu hình `/etc/exports` giống hệt Node 1; tiếp quản VIP khi Node 1 hoặc dịch vụ NFS lỗi. |
-| **NFS Client 1** | `nfs-client-1` (`client-rw`) | `192.168.10.101` | Client kiểm thử đọc/ghi liên tục khi Failover | `TCP -> 192.168.10.100:2049` | Được cấp quyền `rw,sync,root_squash` trên `/share` và `rw,no_root_squash` trên `/no_squash`. |
-| **NFS Client 2** | `nfs-client-2` (`client-ro`) | `192.168.10.102` | Client kiểm chứng phân quyền chỉ đọc trên VIP | `TCP -> 192.168.10.100:2049` | Chỉ có quyền `ro,sync,root_squash` trên `/share` (theo rule subnet `192.168.10.0/24`). |
+| **Mạng Docker** | `ha-cluster_nfs-net` (bridge) | `192.168.10.0/24` | Mạng nội bộ kết nối Client, VIP & GlusterFS | Layer 2/3 Bridge | Cô lập hoàn toàn hạ tầng HA trong `ha-cluster/`. |
+| **Virtual IP (VIP)** | — | `192.168.10.100/24` | Điểm truy cập duy nhất cho toàn bộ NFS Client | `TCP 2049` | Gán động trên `eth0` của Node `MASTER`. |
+| **HA Node 1** | `nfs-ubuntu-node1` (`nfs-node1`) | `192.168.10.11` | Keepalived **MASTER** (`priority 100`) | Brick `bricks/node1` + volume `glusterd-node1`; `TCP 2049`, `24007`, `49152+` | Export `/share` (`Export_Id = 1`), `/no_squash` (`Export_Id = 2`). |
+| **HA Node 2** | `nfs-ubuntu-node2` (`nfs-node2`) | `192.168.10.12` | Keepalived **BACKUP** (`priority 90`) | Brick `bricks/node2` + volume `glusterd-node2`; `TCP 2049`, `24007`, `49152+` | Đồng cấu hình `ganesha.conf`, tiếp quản VIP & phục vụ khi Node 1 lỗi. |
+| **NFS Client 1** | `nfs-client-1` (`client-rw`) | `192.168.10.101` | Client ghi liên tục khi Failover & thử `No_Root_Squash` | `TCP -> 192.168.10.100:2049` | `/share`: `RW`, `Root_Squash` (`65534:65534`); `/no_squash`: `RW`, `No_Root_Squash` (`0:0`). |
+| **NFS Client 2** | `nfs-client-2` (`client-ro`) | `192.168.10.102` | Client kiểm chứng quyền chỉ đọc (`ro`) | `TCP -> 192.168.10.100:2049` | `/share`: chỉ đọc `RO`, `Root_Squash`. |
 
 ---
 
 ## 3. Thiết kế Chi tiết Cấu hình Cụm HA
 
-### 3.1. Thiết kế Thông số Keepalived (VRRP Instance `VI_NFS`)
-
-Cả hai container Server (`nfs-node1` và `nfs-node2`) chạy tiến trình `keepalived` với cùng một cặp thông số VRRP đồng nhất, chỉ khác nhau ở vai trò khởi tạo (`state`), độ ưu tiên (`priority`) và địa chỉ ngang hàng (`unicast_peer`):
+### 3.1. Cấu hình Keepalived (VRRP Instance `VI_NFS`)
 
 | Tham số Keepalived | Giá trị trên `nfs-node1` | Giá trị trên `nfs-node2` | Mục đích thiết kế |
 | :--- | :--- | :--- | :--- |
-| `vrrp_instance` | `VI_NFS` | `VI_NFS` | Tên nhóm VRRP quản lý dịch vụ NFS. |
-| `interface` | `eth0` | `eth0` | Card mạng nội bộ kết nối vào `nfs-net`. |
-| `virtual_router_id` | `51` | `51` | Định danh VRID thống nhất giữa 2 Node. |
-| `state` | `MASTER` | `BACKUP` | `nfs-node1` mặc định giữ VIP khi cụm khởi động. |
-| `priority` | `100` | `90` | Độ ưu tiên bầu chọn khi khởi động bình thường (`100 > 90`); khi `chk_nfs` lỗi, Node 1 chuyển trạng thái `FAULT` và phát gói VRRP `priority 0` để Node 2 thắng cử ngay lập tức. |
-| `advert_int` | `1` | `1` | Chu kỳ gửi Heartbeat 1 giây/lần. |
-| `unicast_src_ip` / `unicast_peer` | Src: `192.168.10.11` / Peer: `192.168.10.12` | Src: `192.168.10.12` / Peer: `192.168.10.11` | Dùng VRRP Unicast để truyền thông ổn định qua Docker bridge mà không phụ thuộc multicast. |
-| `authentication` | `PASS` (shared secret) | `PASS` (shared secret) | Xác thực gói tin VRRP giữa hai Node hợp lệ. |
-| `virtual_ipaddress` | `192.168.10.100/24` | `192.168.10.100/24` | Địa chỉ VIP di động gắn vào Node `MASTER`. |
-| `track_script` | `chk_nfs` (`interval 1`, `timeout 1`, `fall 2`, `rise 2`) | `chk_nfs` (`interval 1`, `timeout 1`, `fall 2`, `rise 2`) | Theo dõi sức khỏe dịch vụ NFS mỗi 1 giây qua `check_nfs.sh`; lỗi 2 lần liên tiếp sẽ chuyển `VI_NFS` sang `FAULT` để nhường VIP ngay. |
+| `vrrp_instance` / `VRID` | `VI_NFS` / `51` | `VI_NFS` / `51` | Nhóm VRRP chung trên card `eth0`. |
+| `state` / `priority` | `MASTER` / `100` | `BACKUP` / `90` | Node 1 giữ VIP khi cụm ổn định; khi `chk_nfs` lỗi, Keepalived đưa `VI_NFS` vào `FAULT` và phát VRRP priority `0` để Node 2 thắng cử tức thì (không dùng `weight`). |
+| `advert_int` | `1` giây | `1` giây | Chu kỳ Heartbeat VRRP Unicast (`unicast_src_ip` / `unicast_peer`). |
+| `garp_master_*` | `delay 1`, `repeat 3`, `refresh 5` | `delay 1`, `repeat 3`, `refresh 5` | Quảng bá Gratuitous ARP cập nhật bảng MAC/ARP ngay khi chuyển VIP. |
+| `authentication` | `PASS` (`nt132ha`) | `PASS` (`nt132ha`) | Khóa xác thực $\le 8$ ký tự theo giới hạn VRRP. |
+| `track_script chk_nfs` | `interval 1`, `timeout 1`, `fall 2`, `rise 2` | `interval 1`, `timeout 1`, `fall 2`, `rise 2` | Chạy `/usr/local/sbin/check_nfs_runtime.sh` (bản copy `root:root 0755` từ `check_nfs.sh`). |
 
-### 3.2. Thiết kế Đồng bộ Lưu trữ, Export và Trạng thái NFSv4
+### 3.2. Cấu hình GlusterFS 10.1 (`gv0` Replica 2) & Non-Systemd Daemon
 
-Để Node 2 tiếp quản VIP mà không gặp lỗi `ESTALE (Stale file handle)` hay treo khóa 90 giây:
+1. **`/etc/glusterfs/glusterd.vol`:** Tự động chèn `option rpc-auth-allow-insecure on` bên trong khối `volume management ... end-volume` (trước `end-volume`) trong [entrypoint.sh](../ha-cluster/gluster-ganesha/entrypoint.sh) để cho phép kết nối port cao (>1024) từ `libgfapi` và container Docker.
+2. **Tham số Volume `gv0` (`replica 2`):**
+   - `192.168.10.11:/data/brick/gv0` và `192.168.10.12:/data/brick/gv0`
+   - `nfs.disable = on` (tắt NFSv3 cũ tích hợp trong Gluster để nhường cổng `2049` cho NFS-Ganesha)
+   - `server.allow-insecure = on` (kích hoạt kết nối `libgfapi` nội bộ)
+   - `cluster.quorum-type = none` (cho phép 1 Node sống sót tiếp tục ghi `rw` trong cụm 2-Node Lab)
+   - `network.ping-timeout = 5` (giảm từ `42s` mặc định xuống `5s` để tránh treo I/O khi brick peer mất kết nối đột ngột)
+   - `cluster.self-heal-daemon = on` (bật `glustershd` tự động đồng bộ bù sau sự cố)
+3. **Tự động phục hồi sau Restart Container:** Khi `nfs-ubuntu-node1` khởi động lại từ `docker stop`, `entrypoint.sh` chờ `glusterfsd` lắng nghe cổng brick, kích hoạt nền `gluster volume heal gv0`, rồi mới khởi động `ganesha.nfsd` $\rightarrow$ bảo đảm Node 1 chỉ vượt qua `check_nfs.sh` (`rise 2`) và lấy lại VIP sau khi brick đã sẵn sàng.
 
-1. **Ánh xạ vùng lưu trữ dùng chung trong Docker:**
-   - `../shared-data/public` $\rightarrow$ `/exports/share` (cả `nfs-node1` và `nfs-node2`)
-   - `../shared-data/restricted` $\rightarrow$ `/exports/no_squash` (cả `nfs-node1` và `nfs-node2`)
-2. **Đồng nhất `/etc/exports` với `fsid` cố định:**
-   - `/exports` dùng `fsid=0,crossmnt,ro,sync,no_subtree_check`
-   - `/exports/share` dùng `fsid=1,sync,no_subtree_check,root_squash` (`rw` cho `192.168.10.101`, `ro` cho `192.168.10.0/24`)
-   - `/exports/no_squash` dùng `fsid=2,rw,sync,no_subtree_check,no_root_squash`
-3. **Đồng bộ thư mục trạng thái `/var/lib/nfs/v4recovery`:**
-   - Gắn vùng lưu trữ dùng chung cho `/var/lib/nfs/v4recovery` (hoặc đồng bộ định kỳ giữa 2 Node qua `setup-shared-storage.sh`) để bảo toàn danh sách `nfs4_clientid` khi failover.
-4. **Tinh chỉnh tham số nhân NFSv4 trước khi chạy `rpc.nfsd`:**
-   - Thiết lập `/proc/fs/nfsd/nfsv4leasetime = 10` và `/proc/fs/nfsd/nfsv4gracetime = 10` (thay vì mặc định `90` giây) giúp rút ngắn đáng kể thời gian chờ cấp khóa mới sau failover mà vẫn đủ biên độ an toàn cho Client gửi State Reclaim.
+### 3.3. Cấu hình NFS-Ganesha 3.5 (`FSAL_GLUSTER` — `ganesha.conf`)
 
-### 3.3. Thiết kế Tham số Mount phía Client tối ưu cho HA
+File cấu hình [ha-cluster/gluster-ganesha/ganesha.conf](../ha-cluster/gluster-ganesha/ganesha.conf) được đồng nhất byte-for-byte trên cả hai Node:
 
-Trên `nfs-client-1` (`192.168.10.101`) và `nfs-client-2` (`192.168.10.102`), điểm mount trỏ thẳng vào Virtual IP thay vì IP vật lý của Node 1:
+- **`NFS_CORE_PARAM`:** `Protocols = 4;`, `mount_path_pseudo = true;`
+- **`NFSV4`:**
+  - `Graceless = true;` (bỏ qua 90 giây chờ Grace Period khi failover nóng bằng Keepalived để giữ `RTO < 5s`).
+  - `Minor_Versions = 0;` & `Only_Numeric_Owners = true;` (**lưu ý tương thích nhân Linux 7.0:** trên Ubuntu 22.04 `nfs-ganesha 3.5`, Client nhân Linux 7.0 mặc định thử `NFSv4.2` gây `OP_GETATTR -> NFS4ERR_BADXDR` và trên `NFSv4.1` gửi `OP_GET_DIR_DELEGATION` khiến Ganesha trả `NFS4ERR_OP_ILLEGAL` ở lần `ls` đầu tiên sau Failover/Failback; cấu hình `Minor_Versions = 0` đưa `-o vers=4` đàm phán sạch về `NFSv4.0` với `0` lỗi suốt Failover/Failback, còn `Only_Numeric_Owners = true` đảm bảo trả chuẩn UID/GID số `65534:65534` thay vì ánh xạ chuỗi).
+  - `Lease_Lifetime = 10;`, `Grace_Period = 10;`, `RecoveryBackend = "fs_ng";`
+- **`EXPORT_DEFAULTS`:** `Anonymous_Uid = 65534;`, `Anonymous_Gid = 65534;`
+- **`EXPORT` 1 (`/share`):** `Path = "/gv0/share"`, `Pseudo = "/share"`, `FSAL { Name = GLUSTER; Hostname = "127.0.0.1"; Volume = "gv0"; Volpath = "/share"; enable_upcall = true; }`; khối `CLIENT` ưu tiên `192.168.10.101` (`RW`, `Root_Squash`) đặt trước `192.168.10.0/24` (`RO`, `Root_Squash`).
+- **`EXPORT` 2 (`/no_squash`):** `Path = "/gv0/no_squash"`, `Pseudo = "/no_squash"`, `FSAL { Name = GLUSTER; Hostname = "127.0.0.1"; Volume = "gv0"; Volpath = "/no_squash"; }`; `CLIENT { Clients = 192.168.10.0/24; Access_Type = RW; Squash = No_Root_Squash; }`.
+
+### 3.4. Tham số Mount tối ưu phía Client
 
 ```bash
 mount -t nfs4 -o vers=4,hard,timeo=50,retrans=2,proto=tcp 192.168.10.100:/share /mnt/nfs/share
 ```
 
-- **`192.168.10.100:/share`:** Đường dẫn NFSv4 pseudo-filesystem (`fsid=0` + `/share`) trỏ vào VIP.
-- **`hard`:** Đảm bảo I/O trên Client tạm dừng an toàn trong vài giây chuyển mạch VIP, không bị lỗi `EIO` làm hỏng dữ liệu.
-- **`timeo=50,retrans=2`:** Rút ngắn thời gian phát hiện kết nối gián đoạn (5.0 giây thay vì 60 giây mặc định), giúp Client kết nối lại tới Node 2 nhanh ngay sau khi Keepalived cập nhật GARP.
+*(Lưu ý: gói `netbase` đã được cài vào image nhằm cung cấp `/etc/protocols` cho cờ `proto=tcp` trên Client lẫn Server.)*
 
 ---
 
-## 4. Kịch bản Chuyển đổi Dự phòng (Failover & Failback Workflow)
+## 4. Kịch bản Failover, Chịu lỗi Offline & GlusterFS Self-Heal
 
 ### 4.1. Biểu đồ Tuần tự (Sequence Diagram)
 
@@ -160,94 +172,72 @@ mount -t nfs4 -o vers=4,hard,timeo=50,retrans=2,proto=tcp 192.168.10.100:/share 
 sequenceDiagram
     participant Client as "nfs-client-1 (192.168.10.101)"
     participant VIP as "VIP (192.168.10.100)"
-    participant Node1 as "nfs-node1 (192.168.10.11 - MASTER)"
-    participant Node2 as "nfs-node2 (192.168.10.12 - BACKUP)"
-    participant Storage as "Shared Storage & v4recovery"
+    participant N1 as "Node 1: Ganesha + glusterfsd"
+    participant N2 as "Node 2: Ganesha + glusterfsd"
+    participant B1 as "Brick 1 (bricks/node1)"
+    participant B2 as "Brick 2 (bricks/node2)"
 
-    Note over Client,Storage: Giai doan 1 - Hoat dong binh thuong
-    Node1->>Node2: VRRP Heartbeat (advert_int 1s, Priority 100)
-    Client->>VIP: Ghi file qua NFSv4 (TCP 2049)
-    VIP->>Node1: Dinh tuyen toi Node 1
-    Node1->>Storage: Ghi du lieu & cap nhat trang thai
-    Node1-->>Client: NFS4_OK
+    Note over Client,B2: Giai doan 1 - Ghi song 2 chieu qua mang
+    Client->>VIP: Ghi dong 1..5 (/share qua NFSv4 TCP 2049)
+    VIP->>N1: Dinh tuyen toi Ganesha Node 1
+    N1->>B1: libgfapi AFR ghi dong bo vao Brick 1
+    N1->>N2: libgfapi AFR nhan ban qua mang 192.168.10.0/24
+    N2->>B2: Ghi vao Brick 2
+    N1-->>Client: NFS4_OK (Brick 1 == Brick 2)
 
-    Note over Client,Storage: Giai doan 2 - Su co xay ra tren Node 1
-    Node1--xNode1: Node 1 sap hoac rpc.nfsd dung (check_nfs.sh FAIL)
-    Client->>VIP: Tiep tuc gui yeu cau ghi (I/O tam treo do co hard)
+    Note over Client,B2: Giai doan 2 - Node 1 sap (Hard Failure / Service Failure)
+    N1--xN1: docker stop -t 5 hoac ganesha-ctl.sh stop
+    N2-->>N2: Phat hien mat VRRP (~2.0-4.3s) -> MASTER + GARP
+    Client->>VIP: Tiep tuc ghi dong 6..20 + file moi luc Node 1 tat
+    VIP->>N2: Dinh tuyen toi Ganesha Node 2
+    N2->>B2: Ghi du lieu & danh dau xattr trusted.afr.* cho Brick 1
+    N2-->>Client: NFS4_OK (RPO = 0, Brick 1 thieu du lieu moi)
 
-    Note over Client,Storage: Giai doan 3 - Phat hien & Chuyen mach VIP (Failover)
-    Node2-->>Node2: Het thoi gian cho VRRP (~3s) -> Chuyen len MASTER
-    Node2->>VIP: Gan 192.168.10.100 vao eth0 & phat Gratuitous ARP
-    Node2->>Storage: Doc trang thai tu /var/lib/nfs/v4recovery (mo Grace Period 10s)
-    Client->>VIP: Ket noi lai TCP & gui State Reclaim
-    VIP->>Node2: Dinh tuyen toi Node 2
-    Node2->>Storage: Tiep tuc ghi du lieu noi tiep
-    Node2-->>Client: NFS4_OK (Khong mat du lieu)
-
-    Note over Client,Storage: Giai doan 4 - Khoi phuc Node 1 (Failback)
-    Node1->>Node1: Khoi dong lai dich vu NFS & Keepalived
-    Node1->>Node2: Tham gia lai VRRP & kiem tra dong bo
+    Note over Client,B2: Giai doan 3 - Node 1 khoi dong lai & Tu dong Self-Heal
+    N1->>N1: glusterd + glusterfsd bat lai
+    N2->>N1: Self-Heal Daemon (shd) dong bo bu (~0.2-0.5s)
+    N1->>B1: Cap nhat du lieu tu Brick 2 -> Brick 1 == Brick 2 (SHA-256 100%)
+    N1->>VIP: Ganesha bat + check_nfs.sh OK -> Failback VIP ve Node 1
 ```
 
-### 4.2. Chi tiết 4 giai đoạn vận hành
+### 4.2. Cơ chế Hai Chế độ Giả lập Sự cố
 
-1. **Giai đoạn 1 — Hoạt động bình thường (Normal Operation):**
-   - `nfs-node1` ở trạng thái `MASTER`, gắn VIP `192.168.10.100/24` trên `eth0` và phát VRRP Advertisement mỗi `1` giây sang `nfs-node2`.
-   - `check_nfs.sh` trên cả hai Node định kỳ xác nhận tiến trình `nfsd`, cổng `TCP 2049` và `exportfs` đều khỏe mạnh.
-   - `nfs-client-1` đọc/ghi dữ liệu liên tục vào `192.168.10.100:/share`; mọi dữ liệu đều đi qua `nfs-node1` xuống Shared Storage.
-2. **Giai đoạn 2 — Kích hoạt sự cố (Failure Injection):**
-   - Kịch bản thiết kế hỗ trợ kiểm thử cả 2 dạng lỗi thực tế:
-     - **Hard Failure:** Dừng đột ngột container `nfs-ubuntu-node1` (`docker stop nfs-ubuntu-node1`) hoặc ngắt giao diện mạng.
-     - **Service Failure:** Dừng dịch vụ NFS theo thứ tự `touch /run/nfs_fault_inject && rpc.nfsd 0 && exportfs -ua` (ngắt luồng `nfsd` và đóng cổng `2049` trước khi bỏ export để tránh lỗi `ESTALE`) trong khi container `nfs-node1` vẫn chạy.
-   - Yêu cầu ghi từ Client tạm thời chờ phản hồi TCP nhờ tùy chọn `hard`.
-3. **Giai đoạn 3 — Phát hiện lỗi & Chuyển mạch VIP (Failover / Takeover):**
-   - Với **Service Failure:** `check_nfs.sh` trả về mã lỗi `1` sau 2 lần kiểm tra liên tiếp (`interval 1s`, `fall 2`), Keepalived trên `nfs-node1` chuyển `VI_NFS` sang `FAULT`, gỡ VIP và phát gói VRRP `priority 0` giúp `nfs-node2` tiếp quản `MASTER` trong **~2–3.5 giây**.
-   - Với **Hard Failure:** Sau ~3 giây không nhận được VRRP Advertisement từ Node 1, `nfs-node2` tự nâng lên `MASTER`.
-   - `nfs-node2` gắn VIP `192.168.10.100/24`, phát **Gratuitous ARP** làm mới bảng ARP của `nfs-client-1` và `nfs-client-2`, tiếp nhận phiên TCP mới trên cổng `2049`, thực hiện State Reclaim trong Grace Period `10` giây và tiếp tục ghi dữ liệu.
-4. **Giai đoạn 4 — Khôi phục Node 1 (Failback):**
-   - Khi `nfs-node1` khởi động lại và `check_nfs.sh` đạt ngưỡng `rise 2` (`PASS` liên tiếp 2 lần):
-     - **Chế độ Preempt (mặc định):** `nfs-node1` lấy lại quyền `MASTER` và VIP `192.168.10.100` do có `priority 100 > 90`.
-     - **Chế độ Non-preempt (`nopreempt`):** Có thể bật nếu muốn giữ VIP ổn định trên `nfs-node2` để tránh phát sinh thêm một lần chuyển mạch khi bảo trì.
+1. **Service Failure (`--mode service`):** Tạo cờ `/run/nfs_fault_inject` và gọi `/usr/local/sbin/ganesha-ctl.sh stop` (giữ thời gian chờ `SIGTERM` tối đa `1s` trước `SIGKILL` để đóng cổng `2049` nhanh gọn) trong khi container `nfs-ubuntu-node1`, `keepalived`, `glusterd` và `glusterfsd` tiếp tục chạy. Keepalived chuyển VIP sang Node 2 sau **~2.0–2.5s**; brick Node 1 vẫn nhận nhân bản trực tiếp qua `glusterfsd` từ Ganesha Node 2.
+2. **Hard Failure + Self-Heal (`--mode hard`):** Chạy `docker stop -t 5 nfs-ubuntu-node1`. Keepalived Node 2 lấy VIP sau **~3.5–4.3s**; Client 1 ghi trọn vẹn `20/20` dòng (`RPO = 0`) và tạo thêm tệp `ha_selfheal_offline_proof.log` trong lúc Node 1 tắt. Kiểm tra ổ đĩa host xác nhận Brick 1 thiếu file mới và lệch SHA-256; khi bật lại `nfs-ubuntu-node1`, GlusterFS `shd` tự động đồng bộ về `0` pending entries trong **~0.2–0.5s** và SHA-256 giữa Brick 1 và Brick 2 khớp **100%**.
 
 ---
 
-## 5. Thiết kế Bộ Script Triển khai (`ha-cluster/`) và Tiêu chí Nghiệm thu
+## 5. Bộ Script, Web Control Center & Hướng dẫn Vận hành
 
-### 5.1. Kiến trúc 3 Script trong `ha-cluster/`
+### 5.1. Danh sách Thành phần trong `ha-cluster/`
 
-| Đường dẫn tệp | Chức năng thiết kế | Hành vi & đầu ra mong đợi |
+| Đường dẫn tệp | Chức năng thiết kế | Hành vi & đầu ra |
 | :--- | :--- | :--- |
-| `ha-cluster/scripts/check_nfs.sh` | Healthcheck cho Keepalived (`vrrp_script chk_nfs`) | Kiểm tra 5 điều kiện: (1) không tồn tại cờ lỗi `/run/nfs_fault_inject`, (2) luồng nhân `/proc/fs/nfsd/threads > 0`, (3) tiến trình `rpc.mountd` đang chạy, (4) cổng `TCP 2049` đang `LISTEN`, (5) `exportfs -s` có `/exports/share`. Trả mã `0` nếu đạt đủ, trả mã `1` nếu bất kỳ kiểm tra nào thất bại. |
-| `ha-cluster/glusterfs-or-drbd/setup-shared-storage.sh` | Chuẩn bị Shared Storage & tối ưu State Recovery | Đảm bảo thư mục chia sẻ (`/exports/share`, `/exports/no_squash`) và thư mục trạng thái `/var/lib/nfs/v4recovery` sẵn sàng, đối chiếu `fsid=0,1,2` đồng nhất giữa `nfs-node1` và `nfs-node2`, và cấu hình `nfsv4leasetime` / `nfsv4gracetime` về `10` giây. |
-| `ha-cluster/scripts/failover-test.sh` | Tự động kiểm thử Failover & đo lường RTO/RPO | Thực hiện luồng end-to-end: xác nhận VIP đang nằm trên `nfs-node1`, mount `192.168.10.100:/share` trên cả `nfs-client-1` (`rw`) và `nfs-client-2` (`ro`), chạy vòng lặp ghi file liên tục kèm tính mã **SHA-256**, đánh sập `nfs-node1`, bấm giờ đo **RTO** đến khi VIP chuyển sang `nfs-node2` và I/O ghi tiếp thành công, đối chiếu toàn vẹn checksum, kiểm chứng quyền `ro` trên `nfs-client-2`, và tự động failback về `nfs-node1`. |
+| `ha-cluster/docker-compose.yml` | Stack HA tự chủ 4 container | Gắn brick riêng (`node1:/data/brick`, `node2:/data/brick`), named volume `glusterd-node{1,2}`, chạy mạng `nfs-net` (`192.168.10.0/24`). |
+| `ha-cluster/gluster-ganesha/` | Image & runtime GlusterFS + Ganesha + Keepalived | Gồm `Dockerfile`, `ganesha.conf`, `ganesha-ctl.sh` (`start/stop/status`) và `entrypoint.sh` (tự patch `glusterd.vol`, chạy D-Bus/rpcbind/glusterd/Keepalived, auto-heal & auto-start Ganesha khi restart). |
+| `ha-cluster/scripts/check_nfs.sh` | Healthcheck `< 50 ms` cho Keepalived | Kiểm tra 5 điều kiện cục bộ (cờ `/run/nfs_fault_inject`, `ganesha.nfsd`, `glusterd`, `glusterfsd`, TCP `2049` `LISTEN`) — không gọi `gluster` CLI RPC. |
+| `ha-cluster/glusterfs-or-drbd/setup-shared-storage.sh` | Bootstrap & kiểm chuẩn 6 bước idempotent | Kiểm tra cô lập brick, peer 2 Node, dọn xattr mồ côi khi tạo lại `gv0`, bật các tham số HA, tạo `/share` & `/no_squash` (`0777`), khởi chạy Ganesha và kiểm chứng SHA-256 Brick 1 == Brick 2. |
+| `ha-cluster/scripts/failover-test.sh` | Kiểm thử Failover, sai lệch Brick & Self-Heal | Chạy kịch bản `--mode service|hard|both`, đo VIP Takeover RTO, chứng minh Brick 1 thiếu/lệch khi tắt và tự đồng bộ 100% SHA-256 khi Node 1 quay lại, kiểm chứng `ro` trên `nfs-client-2`. |
+| `ha-cluster/dashboard/{server.py,index.html}` | Web Control Center (Python stdlib, port `8080`) | Hiển thị sơ đồ 2 Brick độc lập, trạng thái GlusterFS (`Online Bricks`, `Peer`, `Pending Self-Heal`), bảng đối chiếu SHA-256 từng tệp giữa Brick 1 vs Brick 2 theo thời gian thực, khóa đồng bộ `TASK_LOCK` (`HTTP 409`) và nút điều khiển Chaos/Self-Heal. |
 
-### 5.2. Bảng Tiêu chí Nghiệm thu Cụm NFS HA
-
-Hệ thống được xác nhận hoàn thành thiết kế và đạt yêu cầu nghiệm thu khi vượt qua đầy đủ 4 bài kiểm tra sau:
-
-1. **Kiểm chứng chuyển mạch VIP tự động:** Sau khi đánh sập `nfs-node1` (tắt container hoặc dừng dịch vụ NFS), IP `192.168.10.100` tự động xuất hiện trên card mạng `eth0` của `nfs-node2` với **RTO < 5 giây**.
-2. **Kiểm chứng tính minh bạch phía Client:** `nfs-client-1` chỉ mount duy nhất `192.168.10.100:/share`, không phải thực hiện `umount` hay thay đổi cấu hình IP khi Node 1 gặp sự cố.
-3. **Kiểm chứng toàn vẹn dữ liệu (`RPO = 0`):** Tệp tin và chuỗi bản ghi được tạo trước, trong và sau thời điểm chuyển mạch có mã băm **SHA-256 khớp 100%**, không phát sinh lỗi `Stale file handle (ESTALE)` hay thiếu dòng dữ liệu.
-4. **Kiểm chứng duy trì phân quyền Export:** Sau khi `nfs-node2` trở thành `MASTER`, `nfs-client-1` (`192.168.10.101`) vẫn ghi/đọc bình thường (`rw`), trong khi `nfs-client-2` (`192.168.10.102`) vẫn bị giới hạn chỉ đọc (`ro`) đúng như quy hoạch trong `/etc/exports`.
-
-### 5.3. Hướng dẫn Vận hành & Demo Trực tiếp
+### 5.2. Hướng dẫn Chạy Lab & Demo Trực tiếp
 
 Từ thư mục gốc của repository:
 
-1. **Khởi chạy cụm 4 container NFSv4 + Keepalived HA:**
+1. **Dừng stack cơ sở `docker-nfs` (nếu đang chạy để tránh trùng subnet/tên container) và dựng cụm HA mới:**
    ```bash
-   docker compose -f docker-nfs/docker-compose.yml up -d --build
+   docker compose -f docker-nfs/docker-compose.yml down 2>/dev/null || true
+   docker compose -f ha-cluster/docker-compose.yml up -d --build
    ```
-2. **Kiểm chuẩn Shared Storage, `fsid=0,1,2` và tham số trạng thái NFSv4:**
+2. **Khởi tạo GlusterFS `gv0` (`replica 2`), NFS-Ganesha & kiểm chứng đồng bộ sống:**
    ```bash
    ./ha-cluster/glusterfs-or-drbd/setup-shared-storage.sh
    ```
-3. **Chạy kịch bản kiểm thử Failover & Failback tự động (CLI):**
+3. **Chạy bộ kiểm thử Failover, Offline Divergence & GlusterFS Self-Heal:**
    ```bash
    ./ha-cluster/scripts/failover-test.sh --mode both
    ```
-   *(Có thể truyền `--mode service` để giả lập chết dịch vụ `nfsd`, hoặc `--mode hard` để giả lập tắt đột ngột container `nfs-ubuntu-node1`.)*
-4. **Khởi động Web Dashboard giám sát & điều khiển trực quan (tại `http://localhost:8080`):**
+4. **Mở Web Control Center trực quan tại `http://localhost:8080`:**
    ```bash
    python3 ha-cluster/dashboard/server.py --port 8080
    ```

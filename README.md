@@ -21,7 +21,7 @@ Repository lưu trữ mã nguồn, cấu hình Docker, script tự động hóa 
 | **Thành viên 1** | Kiến trúc cốt lõi, So sánh giao thức & Benchmark | `docs/`, `benchmarks/` | `feat/architecture-benchmark` |
 | **Thành viên 2** | NFS Server trên Docker (Ubuntu/CentOS) & Quản lý Export | `docker-nfs/` | `feat/docker-nfs-server` |
 | **Thành viên 3** | NFS Client, Tự động hóa Mount (`fstab`/`systemd`) & Bảo mật | `client-configs/` | `feat/client-automount-sec` |
-| **Thành viên 4** | Hạ tầng High Availability (Keepalived + Shared Storage) | `ha-cluster/` | `feat/nfs-ha-cluster` |
+| **Thành viên 4** | Hạ tầng High Availability (Keepalived + GlusterFS Replica 2 + NFS-Ganesha) | `ha-cluster/` | `feat/nfs-ha-cluster` |
 
 ---
 
@@ -30,19 +30,27 @@ Repository lưu trữ mã nguồn, cấu hình Docker, script tự động hóa 
 ```text
                     +---------------------------------------+
                     |          NFS Clients (Linux)          |
-                    |  (Manual Mount / fstab / systemd)     |
+                    |  (nfs-client-1 .101 rw / .102 ro)     |
                     +-------------------+-------------------+
                                         |
-                                        | Kết nối qua TCP Port 2049
+                                        | NFSv4 (TCP Port 2049)
                                         v
-                          [ Virtual IP: 192.168.56.100 ]
+                        [ Virtual IP: 192.168.10.100/24 ]
+                        [   Keepalived VRRP - VRID 51   ]
                                         |
               +-------------------------+-------------------------+
-              | (Active - Master)                                 | (Passive - Backup)
+              | (Active - MASTER P100)                            | (Standby - BACKUP P90)
               v                                                   v
-+---------------------------+                       +---------------------------+
-|     NFS Server Node 1     | <=== Keepalived ====> |     NFS Server Node 2     |
-|       (Docker Ubuntu)     |   `  (Heartbeat()   |         (Docker Ubuntu)     |
-+-------------+-------------+                       +-------------+-------------+
-              |                                                   |
-              +------ Đồng bộ dữ liệu (DRBD / GlusterFS) ---------+
++---------------------------+     VRRP Unicast (1s)     +---------------------------+
+|     nfs-ubuntu-node1      | <=======================> |     nfs-ubuntu-node2      |
+|     IP: 192.168.10.11     |    (Keepalived + GARP)    |     IP: 192.168.10.12     |
+|  NFS-Ganesha FSAL_GLUSTER |                           |  NFS-Ganesha FSAL_GLUSTER |
+|  glusterd + glusterfsd    | <=======================> |  glusterd + glusterfsd    |
++-------------+-------------+  GlusterFS Replica 2 AFR  +-------------+-------------+
+              |                     & Self-Heal                       |
+              v                                                       v
++---------------------------+                           +---------------------------+
+|   Brick 1 (ext4 độc lập)  |                           |   Brick 2 (ext4 độc lập)  |
+| shared-data/bricks/node1  |                           | shared-data/bricks/node2  |
++---------------------------+                           +---------------------------+
+```

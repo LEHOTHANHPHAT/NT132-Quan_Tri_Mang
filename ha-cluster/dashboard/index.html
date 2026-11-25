@@ -35,7 +35,7 @@
     }
 
     .container {
-      max-width: 1320px;
+      max-width: 1360px;
       margin: 0 auto;
       padding: 20px;
     }
@@ -117,6 +117,13 @@
       margin-bottom: 18px;
     }
 
+    .gluster-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
     .panel {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -132,11 +139,13 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     .topology {
       display: grid;
-      grid-template-columns: 1fr auto 1fr auto 1.1fr auto 1fr;
+      grid-template-columns: 0.95fr auto 1fr auto 1.15fr auto 1.15fr;
       align-items: center;
       gap: 10px;
       padding: 10px 4px;
@@ -162,6 +171,11 @@
       box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
     }
 
+    .topo-box.failover-warn {
+      border-color: var(--amber);
+      box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+    }
+
     .topo-box.offline {
       border-color: rgba(239, 68, 68, 0.6);
       opacity: 0.72;
@@ -174,14 +188,43 @@
 
     .topo-title {
       font-weight: 700;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
     }
 
     .topo-sub {
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       color: var(--muted);
       font-family: var(--font-mono);
       margin-top: 2px;
+    }
+
+    .gluster-link {
+      font-size: 0.74rem;
+      font-weight: 700;
+      text-align: center;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(167, 139, 250, 0.1);
+      color: var(--violet);
+    }
+
+    .gluster-link.ok {
+      border-color: rgba(16, 185, 129, 0.45);
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+    }
+
+    .gluster-link.warn {
+      border-color: rgba(245, 158, 11, 0.45);
+      background: rgba(245, 158, 11, 0.12);
+      color: #fbbf24;
+    }
+
+    .gluster-link.err {
+      border-color: rgba(239, 68, 68, 0.45);
+      background: rgba(239, 68, 68, 0.12);
+      color: #f87171;
     }
 
     .arrow {
@@ -205,6 +248,8 @@
     .kv {
       display: flex;
       justify-content: space-between;
+      align-items: center;
+      gap: 8px;
       padding: 6px 10px;
       background: var(--panel-2);
       border-radius: 8px;
@@ -223,9 +268,10 @@
       display: inline-block;
       padding: 2px 8px;
       border-radius: 6px;
-      font-size: 0.75rem;
+      font-size: 0.74rem;
       font-weight: 700;
       font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
 
     .tag.ok {
@@ -250,7 +296,7 @@
 
     .controls {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
     }
 
@@ -321,17 +367,22 @@
       min-height: 20px;
     }
 
+    .table-wrap {
+      overflow-x: auto;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.82rem;
+      font-size: 0.8rem;
     }
 
     th,
     td {
       text-align: left;
-      padding: 8px 10px;
+      padding: 8px 8px;
       border-bottom: 1px solid var(--border);
+      vertical-align: top;
     }
 
     th {
@@ -341,6 +392,7 @@
 
     td.mono {
       font-family: var(--font-mono);
+      font-size: 0.72rem;
       word-break: break-all;
     }
 
@@ -349,7 +401,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 12px 14px;
-      height: 280px;
+      height: 300px;
       overflow-y: auto;
       font-family: var(--font-mono);
       font-size: 0.79rem;
@@ -357,8 +409,9 @@
       white-space: pre-wrap;
     }
 
-    @media (max-width: 980px) {
-      .grid-2 {
+    @media (max-width: 1060px) {
+      .grid-2,
+      .gluster-strip {
         grid-template-columns: 1fr;
       }
 
@@ -382,13 +435,11 @@
     <header>
       <div>
         <h1>NFSv4 High Availability — Control Center</h1>
-        <div class="subtitle">Cụm Keepalived VRRP (VRID 51) + Shared Storage</div>
+        <div class="subtitle">Cụm Keepalived VRRP (VRID 51) + NFS-Ganesha (FSAL_GLUSTER) + GlusterFS Replica 2</div>
       </div>
       <div class="header-meta">
-        <span id="vip-pill" class="pill"><span class="dot"></span> <span id="vip-pill-text">VIP:
-            192.168.10.100</span></span>
-        <span id="cluster-pill" class="pill healthy"><span class="dot"></span> <span id="cluster-pill-text">Đang
-            tải...</span></span>
+        <span id="vip-pill" class="pill"><span class="dot"></span> <span id="vip-pill-text">VIP: 192.168.10.100</span></span>
+        <span id="cluster-pill" class="pill healthy"><span class="dot"></span> <span id="cluster-pill-text">Đang tải...</span></span>
         <span id="clock-pill" class="pill">--:--:--</span>
       </div>
     </header>
@@ -419,20 +470,27 @@
         <div class="topo-col">
           <div class="topo-box" id="topo-n1">
             <div class="topo-title">nfs-node1 (MASTER / P100)</div>
-            <div class="topo-sub">192.168.10.11</div>
+            <div class="topo-sub">192.168.10.11 • Ganesha + glusterd</div>
           </div>
           <div class="topo-box" id="topo-n2">
             <div class="topo-title">nfs-node2 (BACKUP / P90)</div>
-            <div class="topo-sub">192.168.10.12</div>
+            <div class="topo-sub">192.168.10.12 • Ganesha + glusterd</div>
           </div>
         </div>
-        <div class="arrow active">&harr;</div>
-        <div class="topo-box">
-          <div class="topo-title">Shared Storage</div>
-          <div class="topo-sub">/exports/share (fsid=1)</div>
-          <div class="topo-sub">/var/lib/nfs/v4recovery</div>
+        <div class="arrow" id="topo-arrow-gluster">&harr;</div>
+        <div class="topo-col">
+          <div class="topo-box" id="topo-b1">
+            <div class="topo-title">Brick 1 (ext4 độc lập)</div>
+            <div class="topo-sub">shared-data/bricks/node1</div>
+          </div>
+          <div id="topo-gluster-link" class="gluster-link">GlusterFS Replica 2 (gv0)</div>
+          <div class="topo-box" id="topo-b2">
+            <div class="topo-title">Brick 2 (ext4 độc lập)</div>
+            <div class="topo-sub">shared-data/bricks/node2</div>
+          </div>
         </div>
       </div>
+      <div class="gluster-strip" id="gluster-strip"></div>
     </section>
 
     <section class="grid-2">
@@ -458,43 +516,41 @@
     </section>
 
     <section class="panel">
-      <h2>Bảng Điều khiển Chaos &amp; Kiểm thử Failover</h2>
+      <h2>Bảng Điều khiển Chaos, Self-Heal &amp; Kiểm thử Failover</h2>
       <div class="controls">
-        <button class="primary" data-action="mount_clients" onclick="triggerAction('mount_clients')">Mount Clients qua
-          VIP</button>
-        <button data-action="setup_storage" onclick="triggerAction('setup_storage')">Kiểm tra Shared Storage</button>
-        <button class="danger" data-action="kill_nfs_node1" onclick="triggerAction('kill_nfs_node1')">Tắt dịch vụ NFS
-          Node 1</button>
-        <button class="success" data-action="restore_nfs_node1" onclick="triggerAction('restore_nfs_node1')">Khôi phục
-          NFS Node 1</button>
-        <button class="danger" data-action="stop_node1" onclick="triggerAction('stop_node1')">Stop Container Node
-          1</button>
-        <button class="success" data-action="start_node1" onclick="triggerAction('start_node1')">Start Container Node
-          1</button>
-        <button class="primary" data-action="test_service" onclick="triggerAction('test_service')">Chạy Test Failover
-          (Service)</button>
-        <button class="primary" data-action="test_hard" onclick="triggerAction('test_hard')">Chạy Test Failover
-          (Hard)</button>
+        <button class="primary" data-action="mount_clients" onclick="triggerAction('mount_clients')">Mount Clients qua VIP</button>
+        <button data-action="setup_storage" onclick="triggerAction('setup_storage')">Kiểm chuẩn GlusterFS gv0</button>
+        <button class="success" data-action="trigger_heal" onclick="triggerAction('trigger_heal')">Kích hoạt Self-Heal</button>
+        <button class="danger" data-action="kill_nfs_node1" onclick="triggerAction('kill_nfs_node1')">Tắt Ganesha Node 1</button>
+        <button class="success" data-action="restore_nfs_node1" onclick="triggerAction('restore_nfs_node1')">Khôi phục Ganesha Node 1</button>
+        <button class="danger" data-action="stop_node1" onclick="triggerAction('stop_node1')">Stop Container Node 1</button>
+        <button class="success" data-action="start_node1" onclick="triggerAction('start_node1')">Start Container Node 1</button>
+        <button class="primary" data-action="test_service" onclick="triggerAction('test_service')">Chạy Test Failover (Service)</button>
+        <button class="primary" data-action="test_hard" onclick="triggerAction('test_hard')">Chạy Test Failover (Hard + Heal)</button>
       </div>
       <div class="feedback" id="action-feedback"></div>
     </section>
 
     <section class="grid-2">
       <div class="panel" style="margin-bottom: 0;">
-        <h2>Tệp trong Shared Storage (/exports/share)</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Tên tệp</th>
-              <th>Kích thước</th>
-              <th>SHA-256</th>
-            </tr>
-          </thead>
-          <tbody id="files-body"></tbody>
-        </table>
+        <h2>Đối chiếu Tệp &amp; SHA-256 giữa Brick 1 và Brick 2 (/share)</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tên tệp</th>
+                <th>Kích thước</th>
+                <th>Brick 1 SHA-256</th>
+                <th>Brick 2 SHA-256</th>
+                <th>Đồng bộ</th>
+              </tr>
+            </thead>
+            <tbody id="files-body"></tbody>
+          </table>
+        </div>
       </div>
       <div class="panel" style="margin-bottom: 0;">
-        <h2>Nhật ký Trực tiếp (RTO / RPO / Actions)</h2>
+        <h2>Nhật ký Trực tiếp (RTO / RPO / Self-Heal)</h2>
         <div class="terminal" id="log-terminal"></div>
       </div>
     </section>
@@ -512,17 +568,34 @@
       return box;
     }
 
+    function renderGlusterStrip(gluster) {
+      const strip = document.getElementById("gluster-strip");
+      const healVal = gluster.pending_heal === null || gluster.pending_heal === undefined
+        ? "-- (chờ kết nối)"
+        : `${gluster.pending_heal} entries`;
+      strip.replaceChildren(
+        makeKv("Volume gv0", gluster.status || "OFFLINE"),
+        makeKv("Bricks Online", `${gluster.online_bricks}/${gluster.total_bricks}`),
+        makeKv("Peer Status", gluster.peer_connected ? "Connected" : "Disconnected"),
+        makeKv("Pending Self-Heal", healVal)
+      );
+    }
+
     function renderNode(prefix, node) {
       const badge = document.getElementById(prefix + "-badge");
       const kv = document.getElementById(prefix + "-kv");
+      const lg = node.lease_time != null
+        ? `${node.lease_time}s / ${node.grace_time}s (${node.graceless ? "Graceless" : "Grace"})`
+        : "--";
       kv.replaceChildren(
         makeKv("Container", node.running ? "RUNNING" : "STOPPED"),
         makeKv("Keepalived", node.role),
         makeKv("Giữ VIP .100", node.has_vip ? "CÓ (ACTIVE)" : "KHÔNG"),
         makeKv("check_nfs.sh", node.nfs_healthy ? "HEALTHY" : "UNHEALTHY"),
-        makeKv("nfsd threads", String(node.threads)),
+        makeKv("NFS-Ganesha", node.ganesha_running ? "RUNNING" : "STOPPED"),
+        makeKv("glusterd / glusterfsd", `${node.glusterd_running ? "UP" : "DOWN"} / ${node.glusterfsd_running ? "UP" : "DOWN"}`),
         makeKv("Port 2049", node.port_2049 ? "LISTEN" : "CLOSED"),
-        makeKv("Lease / Grace", node.lease_time != null ? `${node.lease_time}s / ${node.grace_time}s` : "--")
+        makeKv("Lease / Grace", lg)
       );
       badge.textContent = node.has_vip ? `${node.role} + VIP` : node.role;
       badge.className = "tag " + (node.has_vip ? "ok" : (node.nfs_healthy ? "info" : "err"));
@@ -541,13 +614,20 @@
       badge.className = "tag " + (client.mounted ? (client.mount_mode === client.expected_mode ? "ok" : "warn") : "err");
     }
 
+    function syncBadgeInfo(state) {
+      if (state === "SYNCED") return ["ĐỒNG BỘ 2 BRICK", "ok"];
+      if (state === "BRICK2_ONLY") return ["CHỜ SELF-HEAL (B2)", "warn"];
+      if (state === "BRICK1_ONLY") return ["CHỜ SELF-HEAL (B1)", "warn"];
+      return ["LỆCH DỮ LIỆU", "err"];
+    }
+
     function renderFiles(files) {
       const body = document.getElementById("files-body");
-      if (!files.length) {
+      if (!files || !files.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 3;
-        td.textContent = "Chưa có tệp kiểm thử nào trong shared-data/public";
+        td.colSpan = 5;
+        td.textContent = "Chưa có tệp kiểm thử nào trong shared-data/bricks/node{1,2}/gv0/share";
         td.style.color = "#94a3b8";
         tr.appendChild(td);
         body.replaceChildren(tr);
@@ -558,12 +638,26 @@
         const tdName = document.createElement("td");
         tdName.className = "mono";
         tdName.textContent = f.name;
+
         const tdSize = document.createElement("td");
         tdSize.textContent = `${f.size_bytes} B`;
-        const tdSha = document.createElement("td");
-        tdSha.className = "mono";
-        tdSha.textContent = f.sha256;
-        tr.append(tdName, tdSize, tdSha);
+
+        const tdB1 = document.createElement("td");
+        tdB1.className = "mono";
+        tdB1.textContent = f.brick1 && f.brick1.exists ? f.brick1.sha256 : "CHƯA CÓ";
+
+        const tdB2 = document.createElement("td");
+        tdB2.className = "mono";
+        tdB2.textContent = f.brick2 && f.brick2.exists ? f.brick2.sha256 : "CHƯA CÓ";
+
+        const tdState = document.createElement("td");
+        const span = document.createElement("span");
+        const [label, cls] = syncBadgeInfo(f.sync_state);
+        span.className = `tag ${cls}`;
+        span.textContent = label;
+        tdState.appendChild(span);
+
+        tr.append(tdName, tdSize, tdB1, tdB2, tdState);
         return tr;
       });
       body.replaceChildren(...rows);
@@ -605,6 +699,9 @@
           const n2 = data.nodes.node2;
           const c1 = data.clients.client1;
           const c2 = data.clients.client2;
+          const gluster = data.gluster;
+
+          renderGlusterStrip(gluster);
           renderNode("n1", n1);
           renderNode("n2", n2);
           renderClient("c1", c1);
@@ -628,7 +725,32 @@
           topoN1.className = "topo-box" + (n1.has_vip ? " active-vip" : (!n1.running || !n1.nfs_healthy ? " offline" : ""));
           topoN2.className = "topo-box" + (n2.has_vip ? " active-vip" : (!n2.running || !n2.nfs_healthy ? " offline" : ""));
 
-          renderFiles(data.shared_files);
+          const topoB1 = document.getElementById("topo-b1");
+          const topoB2 = document.getElementById("topo-b2");
+          topoB1.className = "topo-box" + (n1.running && n1.glusterfsd_running ? " active-vip" : " offline");
+          topoB2.className = "topo-box" + (n2.running && n2.glusterfsd_running ? " active-vip" : " offline");
+
+          const arrowGluster = document.getElementById("topo-arrow-gluster");
+          const glusterLink = document.getElementById("topo-gluster-link");
+          if (gluster.online_bricks >= 2 && (gluster.pending_heal === 0)) {
+            arrowGluster.className = "arrow active";
+            glusterLink.className = "gluster-link ok";
+            glusterLink.textContent = "GlusterFS Replica 2 (2/2 ONLINE • 0 HEAL)";
+          } else if (gluster.online_bricks >= 2) {
+            arrowGluster.className = "arrow active";
+            glusterLink.className = "gluster-link warn";
+            glusterLink.textContent = `GlusterFS SELF-HEALING (${gluster.pending_heal ?? "?"} entries)`;
+          } else if (gluster.online_bricks === 1) {
+            arrowGluster.className = "arrow";
+            glusterLink.className = "gluster-link warn";
+            glusterLink.textContent = "GlusterFS DEGRADED (1/2 Brick Online)";
+          } else {
+            arrowGluster.className = "arrow";
+            glusterLink.className = "gluster-link err";
+            glusterLink.textContent = "GlusterFS OFFLINE";
+          }
+
+          renderFiles(data.brick_files);
 
           const term = document.getElementById("log-terminal");
           const nearBottom = term.scrollTop + term.clientHeight >= term.scrollHeight - 24;

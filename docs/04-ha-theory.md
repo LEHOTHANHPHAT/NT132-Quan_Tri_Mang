@@ -1,5 +1,6 @@
 # Lý thuyết High Availability (HA) và Khôi phục lỗi cho Hệ thống NFS
 
+- **Môn học / Lớp:** `NT132.R12.ANTT` — Quản trị mạng
 - **Đề tài:** Tìm hiểu và Triển khai Hệ thống Network File System (NFS) & High Availability
 - **Tài liệu thiết kế kiến trúc đi kèm:** [04-ha-design.md](./04-ha-design.md)
 - **Nhánh Git thực hiện:** `feat/nfs-ha-cluster`
@@ -104,7 +105,7 @@ Trong cấu hình DRBD truyền thống (`Primary/Secondary`), tại một thờ
 GlusterFS là hệ thống file phân tán trên không gian người dùng (user-space), kết hợp các thư mục lưu trữ cục bộ (**Bricks**) trên từng máy chủ thành một không gian tên thống nhất qua mô-đun **AFR (Automatic File Replication)** với cấu hình `replica 2` (hoặc `replica 3` để tránh split-brain bằng arbiter):
 
 - **Ghi đồng bộ ở mức tệp:** Khi một tệp được tạo hoặc chỉnh sửa qua điểm mount GlusterFS, cơ chế AFR nhân bản đồng thời dữ liệu xuống tất cả các brick trong tập replica.
-- **Cơ chế Self-Heal:** Nếu một Node ngoại tuyến trong lúc Node kia đang ghi, khi Node lỗi khởi động lại, tiến trình `glusterfsd` tự động đối chiếu thuộc tính mở rộng (`trusted.afr.*`) và đồng bộ bù các tệp bị sai lệch.
+- **Cơ chế Self-Heal:** Nếu một Node ngoại tuyến trong lúc Node kia đang ghi, khi Node lỗi khởi động lại, tiến trình Self-Heal Daemon (`glustershd`) tự động đối chiếu thuộc tính mở rộng (`trusted.afr.*`) và đồng bộ bù các tệp bị sai lệch.
 - **Ưu điểm cho Failover:** Cả hai Node có thể gắn sẵn (mount) volume GlusterFS vào cây thư mục export mà không phải chờ thao tác mount thiết bị block lúc xảy ra sự cố, giúp giảm đáng kể thời gian chuyển mạch.
 
 #### 3. Shared Storage (SAN / NAS / Shared Volume) + Đồng bộ Metadata
@@ -178,3 +179,26 @@ Khả năng phục hồi mượt mà không chỉ phụ thuộc vào cụm Serve
 | **`intr` (trên kernel cũ) / Ctrl+C** | Trên nhân Linux hiện đại, `hard` mặc định cho phép ngắt bằng tín hiệu `SIGKILL` (`kill -9`) nếu cần thiết; vẫn giữ an toàn dữ liệu khi failover ngắn hạn. |
 | **`timeo=<n>` & `retrans=<k>`** | `timeo` tính theo đơn vị $1/10$ giây (mặc định `600` tức 60 giây trên NFSv4/TCP). Việc rút ngắn hợp lý `timeo` (ví dụ `timeo=50` tương ứng 5 giây) và `retrans=2` giúp Client phát hiện kết nối tới Node cũ bị ngắt và thử thiết lập lại phiên TCP tới VIP nhanh hơn. |
 | **`proto=tcp` & `vers=4`** | Sử dụng TCP làm lớp vận chuyển tin cậy và chuẩn giao thức NFSv4 trên cổng `2049`, giúp đi xuyên tường lửa dễ dàng và hỗ trợ cơ chế State Reclaim hoàn chỉnh. |
+
+---
+
+## 4. Kiến trúc User-Space NFS-Ganesha (`FSAL_GLUSTER`) và Quản trị Quorum GlusterFS
+
+### 4.1. So sánh Kernel `nfs-kernel-server` trên FUSE với User-Space NFS-Ganesha (`FSAL_GLUSTER`)
+
+Trong thực tế triển khai NFS HA trên GlusterFS, việc gắn volume GlusterFS qua lớp **FUSE** (`/mnt/gluster`) rồi dùng `nfs-kernel-server` export lại dễ phát sinh nút cổ chai và lỗi kỹ thuật:
+
+- **Chi phí chuyển ngữ cảnh (Context Switch):** Mỗi lời gọi I/O phải đi qua $Client \rightarrow Kernel\ nfsd \rightarrow VFS \rightarrow FUSE\ Daemon \rightarrow Gluster\ Client \rightarrow Mạng$, vừa tốn CPU vừa có nguy cơ treo khóa VFS trong môi trường container Docker.
+- **Xung đột định danh `fsid` & FUSE Re-export:** FUSE không sinh định danh block device ổn định giữa các máy khác nhau, dễ trả về `ESTALE` khi failover sang Node dự phòng.
+
+**NFS-Ganesha** giải quyết triệt để vấn đề này bằng mô hình **user-space NFS Server** tích hợp trực tiếp mô-đun **`FSAL_GLUSTER`** thông qua thư viện **`libgfapi`**:
+
+- Mọi thao tác đọc/ghi từ NFSv4 được Ganesha chuyển thẳng qua `libgfapi` (trong cùng không gian người dùng) tới các Brick GlusterFS qua TCP, loại bỏ hoàn toàn tầng trung gian FUSE.
+- **File Handle đồng nhất nhờ GlusterFS GFID:** Thay vì dựa vào cặp `(st_dev, inode ext4)` vốn khác nhau giữa ổ đĩa cục bộ của Node 1 và Node 2, `FSAL_GLUSTER` mã hóa NFS File Handle từ **GFID (UUID 128-bit toàn cụm)** được GlusterFS gán đồng bộ trong thuộc tính mở rộng `trusted.gfid` của mọi tệp trên cả hai Brick. Nhờ đó, khi VIP chuyển sang Node 2, Client giữ nguyên File Handle cũ mà không gặp lỗi `ESTALE (Stale file handle)`.
+
+### 4.2. Bài toán Quorum và Split-Brain trong GlusterFS 2-Node so với Production Arbiter
+
+Trong mô hình nhân bản **GlusterFS `replica 2`**, hai Node lưu trữ hai bản sao ngang hàng hoàn toàn qua mạng:
+
+- **Chế độ Lab 2-Node (`cluster.quorum-type none`):** Nếu bật kiểm tra đa số mặc định khi chỉ có đúng 2 Node, khi Node 1 tắt nguồn, Node 2 còn lại chỉ chiếm $1/2 = 50\%$ ($\le 50\%$) nên sẽ tự chuyển volume về chỉ đọc để tránh Split-Brain. Trong kịch bản HA Failover 2-Node chủ động qua **một Virtual IP duy nhất** (Active-Passive Keepalived), việc cấu hình `cluster.quorum-type none` kết hợp `network.ping-timeout 5` cho phép Node 2 tiếp tục phục vụ đọc/ghi bình thường (`RPO = 0`), ghi nhật ký sai lệch `trusted.afr.*` và tự động vá bù (**Self-Heal**) ngay khi Node 1 trực tuyến trở lại.
+- **Khuyến nghị Production (`replica 3 arbiter 1`):** Trên hệ thống thực tế cần khả năng tự cô lập Split-Brain ngay ở tầng lưu trữ nếu đứt mạng giữa các Node nhưng cả hai vẫn chạy, quản trị viên bổ sung thêm một Node thứ 3 gọn nhẹ làm **Arbiter** (chỉ lưu metadata/xattr và kích thước tệp $0$ byte) để đạt quy tắc đa số $2/3$ phiếu bầu.

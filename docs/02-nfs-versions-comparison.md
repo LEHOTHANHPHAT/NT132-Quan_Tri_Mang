@@ -111,8 +111,9 @@ Trong `docker-nfs/ubuntu-server/exports` của lab:
 ```
 
 `/exports` là gốc NFSv4 nhờ `fsid=0`. Vì `share` nằm dưới gốc này,
-client mount `192.168.10.11:/share` hoặc qua VIP
-`192.168.10.100:/share`, thay vì đường dẫn vật lý `:/exports/share`.
+client mount `192.168.10.11:/share` (lab `docker-nfs/`) hoặc qua VIP
+`192.168.10.100:/share` của cụm HA `ha-cluster/`, thay vì đường dẫn
+vật lý `:/exports/share`.
 Export cấp `rw` cho client `192.168.10.101` và `ro` cho subnet;
 quyền filesystem và ánh xạ UID/GID vẫn ảnh hưởng đến truy cập thực tế.
 
@@ -126,6 +127,12 @@ với giá trị sau failover.
 Phép thử thực hiện trên **hai container cùng Docker host**. Minh chứng
 không kiểm tra reclaim khóa đang được giữ và không đo thời gian gián đoạn
 dịch vụ; vì vậy không thể kết luận hai nội dung đó đã được kiểm chứng.
+
+*Cập nhật:* Keepalived/VIP đã được tách khỏi `docker-nfs/` sang cụm HA
+`ha-cluster/` (GlusterFS `replica 2` + NFS-Ganesha). Thời gian chuyển VIP
+được đo bằng `ha-cluster/scripts/failover-test.sh`, xem
+[04-ha-design.md](04-ha-design.md). Cụm này cấu hình `Graceless = true`
+nên vẫn chưa kiểm chứng reclaim khóa.
 
 ## Tài liệu tham khảo
 

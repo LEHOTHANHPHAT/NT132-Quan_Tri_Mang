@@ -1,14 +1,14 @@
 #!/bin/bash
 ###############################################################################
 # check_nfs.sh
-# Thành viên 4 (Nguyễn Nhựt Quốc) - Healthcheck dịch vụ NFS cho Keepalived
+# Thành viên 4 (Nguyễn Nhựt Quốc) - Healthcheck NFS-Ganesha + GlusterFS cho Keepalived
 #
-# Kiểm tra tuần tự 5 điều kiện sức khỏe của NFSv4 Server:
+# Kiểm tra nhanh (< 50 ms, không gọi gluster CLI RPC) 5 điều kiện sức khỏe:
 #   1. Không có tệp cờ giả lập lỗi /run/nfs_fault_inject
-#   2. Luồng kernel nfsd đang hoạt động (/proc/fs/nfsd/threads > 0)
-#   3. Tiến trình rpc.mountd đang chạy
-#   4. Cổng TCP 2049 đang ở trạng thái LISTEN
-#   5. Bảng exportfs -s đang chia sẻ /exports/share
+#   2. Tiến trình ganesha.nfsd đang chạy
+#   3. Tiến trình glusterd đang chạy
+#   4. Tiến trình brick cục bộ glusterfsd đang chạy
+#   5. Cổng TCP 2049 đang ở trạng thái LISTEN
 #
 # Cách dùng:
 #   /usr/local/bin/check_nfs.sh           # Chế độ im lặng cho Keepalived
@@ -40,37 +40,32 @@ if [ -e /run/nfs_fault_inject ]; then
 fi
 log_ok "Khong co co gia lap loi /run/nfs_fault_inject"
 
-# 2. Kiểm tra số luồng nhân nfsd
-if [ ! -r /proc/fs/nfsd/threads ]; then
-    log_fail "Khong doc duoc /proc/fs/nfsd/threads (nfsd chua mount)"
+# 2. Kiểm tra tiến trình ganesha.nfsd
+if ! pgrep -x ganesha.nfsd >/dev/null 2>&1; then
+    log_fail "Tien trinh ganesha.nfsd khong hoat dong"
     exit 1
 fi
-NFSD_THREADS="$(tr -d '[:space:]' < /proc/fs/nfsd/threads 2>/dev/null || echo 0)"
-if ! [[ "${NFSD_THREADS}" =~ ^[0-9]+$ ]] || [ "${NFSD_THREADS}" -le 0 ]; then
-    log_fail "So luong nfsd = ${NFSD_THREADS:-0} (<= 0)"
-    exit 1
-fi
-log_ok "Luong kernel nfsd dang chay: ${NFSD_THREADS}"
+log_ok "Tien trinh ganesha.nfsd dang hoat dong"
 
-# 3. Kiểm tra tiến trình rpc.mountd
-if ! pgrep -x rpc.mountd >/dev/null 2>&1; then
-    log_fail "Tien trinh rpc.mountd khong hoat dong"
+# 3. Kiểm tra tiến trình glusterd
+if ! pgrep -x glusterd >/dev/null 2>&1; then
+    log_fail "Tien trinh glusterd khong hoat dong"
     exit 1
 fi
-log_ok "Tien trinh rpc.mountd dang hoat dong"
+log_ok "Tien trinh glusterd dang hoat dong"
 
-# 4. Kiểm tra cổng TCP 2049 đang LISTEN
+# 4. Kiểm tra tiến trình brick cục bộ glusterfsd
+if ! pgrep -x glusterfsd >/dev/null 2>&1; then
+    log_fail "Tien trinh brick glusterfsd khong hoat dong"
+    exit 1
+fi
+log_ok "Tien trinh brick glusterfsd dang hoat dong"
+
+# 5. Kiểm tra cổng TCP 2049 đang LISTEN
 if ! ss -ltn 2>/dev/null | grep -qE '[:.]2049([[:space:]]|$)'; then
     log_fail "Cong TCP 2049 khong o trang thai LISTEN"
     exit 1
 fi
 log_ok "Cong TCP 2049 dang LISTEN"
-
-# 5. Kiểm tra bảng exportfs
-if ! exportfs -s 2>/dev/null | grep -q '/exports/share'; then
-    log_fail "Khong tim thay /exports/share trong exportfs -s"
-    exit 1
-fi
-log_ok "Bang exportfs -s co /exports/share"
 
 exit 0
