@@ -1,153 +1,174 @@
 # Mount Options & Bảo mật NFS Client
+Phần này không thể thực hiện trên Container Client được nên sẽ triển khai trên 2 máy ảo Ubuntu
+
 | Client | IP | Quyền trên `/share` |
 |---|---|---|
 | `client-rw` | 192.168.10.101 | `rw` |
 | `client-ro` | 192.168.10.102 | `ro` |
-## Dựng môi trường
 
-Trong thư mục `docker-nfs` chạy lệnh khởi động các container (nhớ mở docker lên trước):
+## Chạy NFS Server
+Trong thư mục `docker-nfs` của máy server chạy lệnh 
 ```bash
-docker compose up -d --build
+sudo docker compose up -d --build nfs-node1
 ```
 
 Kiểm tra:
 ```bash
-docker compose ps
+sudo docker compose ps -a
 ```
-
-## Vào trong container
-Container giống như một máy riêng biệt, cần login vào để sử dụng
+Chỉ có 1 node đang chạy (STATUS Up) trên 1 máy, nếu sai chạy lệnh sau để xóa container và chạy lại
 ```bash
-docker exec -it nfs-client-1 bash
-hoặc
-docker exec -it nfs-client-2 bash
+sudo docker compose down
 ```
 
-## Copy file script vào container
-Copy các file script trong máy thật vào container (đứng ở folder `NT132-Quan_Tri_Mang`):
+## Cài đặt Client trên 2 máy Ubuntu
+Cài đặt NFS Client
 ```bash
-docker cp client-configs/manual-mount.sh nfs-client-1:/root/
-docker cp client-configs/manual-mount.sh nfs-client-2:/root/
-docker cp client-configs/setup-fstab-automount.sh nfs-client-1:/root/
-docker cp client-configs/security-demo/privesc-no-root-squash.sh nfs-client-1:/root/
+sudo apt install -y nfs-common
 ```
 
-# Thực hiện mount thủ công
-Vào container 1 và chạy 2 lệnh:
+- Clone folder đồ án
 ```bash
-docker exec -it nfs-client-1 bash
+git clone https://github.com/LEHOTHANHPHAT/NT132-Quan_Tri_Mang
 ```
+
+- Vào thư mục `client-configs` cấp quyền thực thi
 ```bash
-chmod +x /root/manual-mount.sh
-/root/manual-mount.sh rw
+find . -name "*.sh" -exec sed -i 's/\r$//' {} \;
+chmod +x manual-mount.sh setup-fstab-automount.sh security-demo/privesc-no-root-squash.sh
 ```
 
-Container 2 chạy lệnh:
+## Thực hiện mount thủ công
+Trên nfs-client1 (.101 — được cấp quyền rw):
 ```bash
-docker exec -it nfs-client-2 bash
+sudo ./manual-mount.sh rw
 ```
+
+Trên nfs-client2 (.102 — chỉ được quyền ro):
 ```bash
-chmod +x /root/manual-mount.sh
-/root/manual-mount.sh ro
+sudo ./manual-mount.sh ro
 ```
 
-Kết quả mẫu:
-- Với container 1 được cấp quyền đọc ghi - rw:
+Kết quả:
+- client1 - rw: GHI THANH CONG
+- client2 - ro: KHONG THE GHI
+
+## Mount tự động qua fstab
+Trước tiên cần gỡ các mount cũ trước khi thực hiện
 ```bash
-root@client-1:/# chmod +x /root/manual-mount.sh
-/root/manual-mount.sh rw
-=== [1/5] Cai dat goi NFS client (nfs-common) ===
-nfs-common da duoc cai dat, bo qua.
-=== [2/5] Kiem tra RPC/portmapper toi server 192.168.10.11 ===
-   program vers proto   port  service
-    100000    4   tcp    111  portmapper
-    100000    3   tcp    111  portmapper
-    100000    2   tcp    111  portmapper
-    100000    4   udp    111  portmapper
-    100000    3   udp    111  portmapper
-    100000    2   udp    111  portmapper
-    100024    1   udp  33778  status
-    100024    1   tcp  45653  status
-    100003    4   tcp   2049  nfs
-    100005    1   udp  50347  mountd
-    100005    1   tcp  50733  mountd
-    100005    2   udp  54094  mountd
-    100005    2   tcp  37033  mountd
-=== [3/5] Tao thu muc mount point ===
-=== [4/5] Mount thu cong bang 'mount -t nfs4' (che do: rw) ===
-=== [5/5] Kiem chung ket qua mount ===
-192.168.10.11:/share on /mnt/nfs/share type nfs4 (rw,relatime,vers=4.2,rsize=524288,wsize=524288,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,clientaddr=192.168.10.101,local_lock=none,addr=192.168.10.11)
-Filesystem           Type  Size  Used Avail Use% Mounted on
-192.168.10.11:/share nfs4   78G   14G   61G  18% /mnt/nfs/share
-
->>> Test quyen ghi thuc te:
-  -> GHI THANH CONG (dung voi client duoc cap quyen rw)
-
-De go mount: umount /mnt/nfs/share
+sudo umount /mnt/nfs/share 2>/dev/null
 ```
 
-- Với container 2 chỉ cấp quyền đọc - ro:
+Trên nfs-client1 (.101 — được cấp quyền rw):
 ```bash
-root@client-2:/# chmod +x /root/manual-mount.sh
-/root/manual-mount.sh ro
-=== [1/5] Cai dat goi NFS client (nfs-common) ===
-nfs-common da duoc cai dat, bo qua.
-=== [2/5] Kiem tra RPC/portmapper toi server 192.168.10.11 ===
-   program vers proto   port  service
-    100000    4   tcp    111  portmapper
-    100000    3   tcp    111  portmapper
-    100000    2   tcp    111  portmapper
-    100000    4   udp    111  portmapper
-    100000    3   udp    111  portmapper
-    100000    2   udp    111  portmapper
-    100024    1   udp  33778  status
-    100024    1   tcp  45653  status
-    100003    4   tcp   2049  nfs
-    100005    1   udp  50347  mountd
-    100005    1   tcp  50733  mountd
-    100005    2   udp  54094  mountd
-    100005    2   tcp  37033  mountd
-=== [3/5] Tao thu muc mount point ===
-=== [4/5] Mount thu cong bang 'mount -t nfs4' (che do: ro) ===
-=== [5/5] Kiem chung ket qua mount ===
-192.168.10.11:/share on /mnt/nfs/share type nfs4 (ro,relatime,vers=4.2,rsize=524288,wsize=524288,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,clientaddr=192.168.10.102,local_lock=none,addr=192.168.10.11)
-Filesystem           Type  Size  Used Avail Use% Mounted on
-192.168.10.11:/share nfs4   78G   14G   61G  18% /mnt/nfs/share
-
->>> Test quyen ghi thuc te:
-  -> KHONG THE GHI (dung voi client chi duoc cap quyen ro / root_squash)
-
-De go mount: umount /mnt/nfs/share
+sudo ./setup-fstab-automount.sh rw
 ```
 
-# Dựng mount tự động - fstab
-
-Dọn mount cũ trên mỗi container để tránh xung đột
+Trên nfs-client2 (.102 — chỉ được quyền ro):
 ```bash
-umount /mnt/nfs/share
+sudo ./setup-fstab-automount.sh ro
 ```
 
-## Chạy script cấu hình fstab
-
+## Kiểm tra
+Test quyền write/read
 ```bash
-chmod +x /root/setup-fstab-automount.sh
-/root/setup-fstab-automount.sh rw
+echo "Hello World!" > /mnt/nfs/share/test.txt
 ```
-## Kiểm tra option mount
+
+Hoặc mở trực tiếp folder bằng cách mở ứng dụng quản lý files bấm tổ hợp `Ctrl + L` để mở thanh nhập đường dẫn, nhập `/mnt/nfs/share`
+
+## Kiểm tra chi tiết kết quả mount tự động (fstab)
+
+Xem lại dòng vừa được thêm vào `/etc/fstab`:
+```bash
+cat /etc/fstab | tail -1
+```
+Kết quả:
+```
+192.168.10.11:/share  /mnt/nfs/share  nfs4  rw,vers=4.2,sec=sys,hard,intr,_netdev,x-systemd.automount,x-systemd.mount-timeout=10,noauto  0  0
+```
+
+Nạp lại và kiểm tra unit automount do systemd tự sinh từ dòng fstab trên:
+```bash
+sudo systemctl daemon-reload
+systemctl list-units --type=automount
+```
+
+Vì entry fstab có `noauto` + `x-systemd.automount`, mount **sẽ không xuất hiện ngay lúc boot**, chỉ kích hoạt khi có truy cập thực tế (cơ chế on-demand):
+```bash
+ls /mnt/nfs/share        # hành động truy cập này kích hoạt mount thật sự
+mount | grep nfs4         # kiểm tra lại, giờ phải thấy dòng mount
+```
+
+### Biến thể: mount tự động ngay lúc boot (không chờ truy cập)
+
+Nếu muốn mount xuất hiện ngay khi VM khởi động (không cần `ls` trước), bỏ 2 option `noauto` và `x-systemd.automount`:
+```bash
+sudo sed -i 's/,noauto,x-systemd.automount,x-systemd.mount-timeout=10//' /etc/fstab
+cat /etc/fstab | tail -1
+```
+Test bằng cách khởi động lại máy:
+```bash
+sudo reboot
+```
+Sau khi SSH lại, kiểm tra ngay (không cần `ls` trước):
 ```bash
 mount | grep nfs4
 ```
-- Kiểm tra có rw/ro không.
 
-## Kiểm tra quyền đọc ghi
+## Mount tự động bằng systemd `.mount` & `.automount` units
 
-- client-rw sẽ ghi thành công còn client-ro sẽ thất bại
+Cách này tách biệt hoàn toàn khỏi `/etc/fstab`, khai báo trực tiếp bằng 2 file unit — cách làm chuẩn hơn trong triển khai thực tế.
+
+Dọn mount/entry fstab cũ trước khi chuyển sang cách này, tránh xung đột cùng 1 mount point:
 ```bash
-echo "fstab-test-$(date +%s)" > /mnt/nfs/share/fstab-test.txt && echo "GHI THANH CONG" || echo "GHI THAT BAI"
+sudo umount /mnt/nfs/share 2>/dev/null
+sudo sed -i '/192.168.10.11:\/share/d' /etc/fstab
+sudo systemctl daemon-reload
 ```
 
-- Tuy client-ro không ghi được file nhưng vẫn thấy file do client-rw tạo -> Cho thấy cả 2 đang dùng chung 1 folder
+Copy 2 file unit có sẵn trong project vào thư mục hệ thống:
 ```bash
-cat /mnt/nfs/share/fstab-test.txt
-ls -la /mnt/nfs/share/
+sudo cp ~/NT132-Quan_Tri_Mang/client-configs/systemd/mnt-nfs-share.mount /etc/systemd/system/
+sudo cp ~/NT132-Quan_Tri_Mang/client-configs/systemd/mnt-nfs-share.automount /etc/systemd/system/
 ```
+
+Trên `nfs-client2` (.102), sửa lại quyền `ro` trong file `.mount` (client1 giữ nguyên `rw` mặc định):
+```bash
+sudo sed -i 's/Options=rw,/Options=ro,/' /etc/systemd/system/mnt-nfs-share.mount
+```
+
+Nạp lại và kích hoạt:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now mnt-nfs-share.automount
+```
+
+Kiểm tra:
+```bash
+systemctl status mnt-nfs-share.automount
+systemctl status mnt-nfs-share.mount   # "inactive (dead)" là bình thường trước khi có truy cập
+ls /mnt/nfs/share                       # kích hoạt mount
+systemctl status mnt-nfs-share.mount   # giờ phải "active (mounted)"
+mount | grep nfs4
+```
+
+Kiểm tra cơ chế tự ngắt sau thời gian không sử dụng (`TimeoutIdleSec=600`):
+```bash
+ls /mnt/nfs/share
+sleep 610
+mount | grep nfs4   # kỳ vọng: không còn mount (đã tự umount do idle)
+ls /mnt/nfs/share   # truy cập lại -> tự mount lại ngay
+```
+
+## So sánh 2 cách mount tự động
+
+| Tiêu chí | `/etc/fstab` (có `noauto`+`x-systemd.automount`) | `.mount` + `.automount` thủ công |
+|---|---|---|
+| Mount xuất hiện khi nào | Khi có truy cập đầu tiên | Khi có truy cập đầu tiên |
+| Cách khai báo | 1 dòng trong `/etc/fstab` | 2 file unit riêng trong `/etc/systemd/system/` |
+| Cơ chế vận hành | systemd tự sinh unit automount từ dòng fstab | Dùng trực tiếp unit do mình viết |
+| Tự ngắt khi idle | Có (`x-systemd.mount-timeout`/mặc định) | Có (`TimeoutIdleSec`, tự khai báo) |
+| Phù hợp minh hoạ cho | Cách khai báo đơn giản, quen thuộc | Cơ chế `systemd automount` hiện đại, tách biệt rõ ràng |
+
+**Lưu ý quan trọng:** không chạy đồng thời cả 2 cách trên cùng 1 mount point — nếu đã làm cách `.mount`/`.automount`, phải xoá entry trong `/etc/fstab` trước (đã thực hiện ở bước dọn dẹp phía trên), tránh 2 cơ chế tranh nhau quản lý cùng `/mnt/nfs/share`.
