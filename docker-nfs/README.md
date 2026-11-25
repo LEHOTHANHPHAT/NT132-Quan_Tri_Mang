@@ -11,15 +11,21 @@
 | `nfs-ubuntu-node2` | `192.168.10.12` | NFS Server dự phòng |
 | `nfs-client-1` | `192.168.10.101` | Đọc và ghi trên `/share` |
 | `nfs-client-2` | `192.168.10.102` | Chỉ đọc trên `/share` |
-| VIP | `192.168.10.100` | Địa chỉ truy cập chung khi thử failover |
-
 Hai NFS Server chạy trên cùng Docker host và dùng chung thư mục
-lưu trữ. Mount vào `.12:/share` để kiểm tra trực tiếp Node 2.
-Mount vào `.100:/share` để kiểm tra khả năng chuyển đổi dự phòng.
+lưu trữ. Mount vào `.11:/share` hoặc `.12:/share` để kiểm tra trực
+tiếp từng Node.
+
+> **Lưu ý:** `docker-nfs/` là lab NFS cơ sở (`nfs-kernel-server`),
+> không chạy Keepalived/VIP. Kiểm thử VIP `192.168.10.100` và failover
+> được thực hiện trên cụm HA riêng tại `ha-cluster/` (GlusterFS
+> `replica 2` + NFS-Ganesha + Keepalived) — xem
+> [04-ha-design.md](../docs/04-ha-design.md). Hai stack dùng chung
+> subnet `192.168.10.0/24` và tên container nên chỉ chạy một stack
+> tại một thời điểm.
 
 ## 2. Khởi động và kiểm tra lab
 
-Chạy từ thư mục gốc `nfs-ha-project`:
+Chạy từ thư mục gốc của repository:
 
 ```bash
 docker version
@@ -112,6 +118,8 @@ Nếu kết quả khác dự kiến, kiểm tra `findmnt` trên hai client
 - [Tuần 7 — Phân quyền qua VIP trước và sau failover](minhchung_tuan7_phanquyen_vip.md)
 - [Lý thuyết về các phiên bản NFS](../docs/02-nfs-versions-comparison.md)
 
-Bài failover xác nhận Node 2 tiếp quản VIP, file kiểm thử giữ nguyên
+Bài failover tuần 7 (thực hiện trên cấu hình Keepalived cũ trong
+`docker-nfs/`, trước khi tách sang `ha-cluster/`) xác nhận Node 2
+tiếp quản VIP, file kiểm thử giữ nguyên
 SHA-256 và quyền RW/RO vẫn được duy trì. Phép thử diễn ra giữa hai
 container trên cùng Docker host và chưa đo thời gian gián đoạn.

@@ -1,5 +1,12 @@
 # Tuần 7 — Kiểm tra quyền RW/RO qua VIP khi failover
 
+> **Ghi chú:** Phép thử này chạy trên cấu hình Keepalived cũ được
+> tích hợp trong `docker-nfs/` (commit `adaf7eb`). Hiện Keepalived/VIP
+> đã được tách sang cụm HA riêng `ha-cluster/`; để chạy lại kịch bản
+> failover, dùng `ha-cluster/scripts/failover-test.sh` (xem
+> [04-ha-design.md](../docs/04-ha-design.md)). Kết quả bên dưới giữ
+> nguyên như lúc ghi nhận.
+
 ## Mục tiêu
 
 Kiểm tra dữ liệu và quyền truy cập NFS khi VIP `192.168.10.100`
